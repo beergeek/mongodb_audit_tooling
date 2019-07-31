@@ -1,4 +1,4 @@
-import time, pymongo, configparser, os.path, sys, ast
+import time, pymongo, configparser, os.path, sys, ast, json
 from pprint import pprint
 from pymongo.errors import DuplicateKeyError, OperationFailure
 
@@ -14,7 +14,11 @@ try:
   audit_db_connection_string = config.get('audit_db','connection_string')
   ops_manager_timeout = config.getint('ops_manager_db','timeout', fallback=100000)
   audit_db_timeout = config.getint('audit_db','timeout', fallback=100000)
-  pipeline = ast.literal_eval(config.get('ops_manager_db','event_pipeline',fallback=[]))
+  temp_pipeline = config.get('ops_manager_db','event_pipeline',fallback=None)
+  if temp_pipeline is not None:
+    pipeline = ast.literal_eval(temp_pipeline)
+  else:
+    pipeline = []
 except configparser.NoOptionError as e:
   print(e)
   print('\033[91m' + "ERROR! The config file must include the `connection_string` option in both the `ops_manager_db` and `audit_db` sections "
