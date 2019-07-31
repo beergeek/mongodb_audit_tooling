@@ -8,7 +8,7 @@ The following tools are in this repository:
 * config_watcher (to retrieve configuration changes to Ops Manager and forward to a MongoDB audit database)
 * event_watcher (to retrieve audit events from Ops Manager and forward to a MongoDB audit database)
 
-# Setup
+# Details
 
 ## log_processor
 
