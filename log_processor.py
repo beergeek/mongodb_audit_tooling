@@ -11,8 +11,8 @@ try:
   debug = config.getboolean('general','debug', fallback=False)
   audit_db_connection_string = config.get('audit_db','connection_string')
   audit_db_timeout = config.getint('audit_db','timeout', fallback=100000)
-  elevated_ops_events = config.get('general','elevated_ops_events',fallback=[])
-  elevated_app_events = config.get('general','elevated_app_events',fallback=[])
+  elevated_ops_events = config.get('general','elevated_ops_events',fallback='').split(',')
+  elevated_app_events = config.get('general','elevated_app_events',fallback='').split(',')
   audit_log = config.get('general','audit_log',fallback='audit.log')
 except configparser.NoOptionError as e:
   print(e)
@@ -40,6 +40,8 @@ config.read('mongodb.config')
 if debug == True:
   print("AUDIT CONNECTION STRING: %s" % audit_db_connection_string)
   print("AUDIT LOG: %s" % audit_log)
+  print("OPS EVENTS: %s" % elevated_ops_events)
+  print("APP EVENTS: %s" % elevated_app_events)
 
 client = pymongo.MongoClient(audit_db_connection_string,serverSelectionTimeoutMS=audit_db_timeout)
 try:
