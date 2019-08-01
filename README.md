@@ -22,16 +22,30 @@ The configuration file has the following format (__NOTE__: none of the string ha
 
 ```shell
 [audit_db]
-connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>
+connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>&<OTHER_OPTIONS>
 timeout=<TIMEOUT_VALUE>
 
 [general]
 debug=<BOOLEAN_VALUE>
+audit_log=<AUDIT_LOG_PATH>
 elevated_ops_events=<COMMA_SEPARATED_LIST>
 elevated_app_events=<COMMA_SEPARATED_LIST>
 ```
 
-Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly). The `elevated_app_events` and `elevated_ops_events` are comma separated lists of events that will be either tagged as `APP EVENT` or `OPS EVENT` respectively for easy querying in the audit database.
+Example:
+
+```shell
+[audit_db]
+connection_string=mongodb://auditor%%40MONGODB.LOCAL@mongod0.mongodb.local:27017/?replicaSet=repl0&authSource=$external&authMechanism=GSSAPI
+timeout=1000
+
+[general]
+debug=True
+audit_log=/data/logs/audit_log
+elevated_ops_events=shutdown
+elevated_app_events=dropCollection,dropDatabase
+```
+Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly). The `elevated_app_events` and `elevated_ops_events` are comma separated lists of events that will be either tagged as `APP EVENT` or `OPS EVENT` respectively for easy querying in the audit database. The `audit_log` option, which is optional, is the path, including file name, to the MongoDB instance audit log, the default is `audit.log` in the directory where the script resides.
 
 ## config_watcher
 
@@ -43,17 +57,19 @@ The configuration file has the following format (__NOTE__: none of the string ha
 
 ```shell
 [audit_db]
-connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>
+connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>&<OTHER_OPTIONS>
 timeout=<TIMEOUT_VALUE>
 
 [ops_manager_db]
-connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>
+connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>&<OTHER_OPTIONS>
 timeout=<TIMEOUT_VALUE>
 event_pipeline=<MONGODB_PIPELINE>
 
 [general]
 debug=<BOOLEAN_VALUE>
 ```
+
+An example that is similar to this script can be found in the section below.
 
 Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly). The optional `event_pipeline` is a change stream pipeline to filter events.
 
@@ -67,16 +83,32 @@ The configuration file has the following format (__NOTE__: none of the string ha
 
 ```shell
 [audit_db]
-connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>
+connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>&<OTHER_OPTIONS>
 timeout=<TIMEOUT_VALUE>
 
 [ops_manager_db]
-connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>
+connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>&<OTHER_OPTIONS>
 timeout=<TIMEOUT_VALUE>
 event_pipeline=<MONGODB_PIPELINE>
 
 [general]
 debug=<BOOLEAN_VALUE>
+```
+
+An example:
+
+```shell
+[audit_db]
+connection_string=mongodb://auditor%%40MONGODB.LOCAL@om.mongodb.local:27017/?replicaSet=repl0&authSource=$external&authMechanism=GSSAPI
+timeout=2000
+
+[ops_manager_db]
+connection_string=mongodb://auditwriter%%40MONGODB.LOCAL@audit.mongodb.local:27017?replicaSet=audit&authSource=$external&authMechanism=GSSAPI
+timeout=1000
+event_pipeline=[{'$match': {'fullDocument.un': {$in: ['ivan','vigyan','mac']}}]
+
+[general]
+debug=False
 ```
 
 Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly). The optional `event_pipeline` is a change stream pipeline to filter events.
