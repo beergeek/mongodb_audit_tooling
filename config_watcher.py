@@ -1,4 +1,4 @@
-import time, pymongo, configparser, os.path, sys, ast, logging, datetime, kerberos
+import time, pymongo, configparser, os.path, sys, ast, logging, datetime, kerberos, re
 from pprint import pprint
 from pymongo.errors import DuplicateKeyError, OperationFailure
 
@@ -64,12 +64,12 @@ else:
 if debug == True:
   logging.basicConfig(filename=LOG_FILE,level=logging.DEBUG)
   logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
-  logging.debug("AUDIT CONNECTION STRING: %s" % audit_db_connection_string)
-  logging.debug("CONNECTION STRING: %s" % ops_manager_connection_string)
+  logging.debug("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', audit_db_connection_string))
+  logging.debug("CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',ops_manager_connection_string))
   logging.debug("RESUME TOKEN: %s" % resume_token)
   logging.debug("PIPELINE: %s" % pipeline)
-  print("AUDIT CONNECTION STRING: %s" % audit_db_connection_string)
-  print("CONNECTION STRING: %s" % ops_manager_connection_string)
+  print("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', audit_db_connection_string))
+  print("CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',ops_manager_connection_string))
   print("RESUME TOKEN: %s" % resume_token)
   print("PIPELINE: %s" % pipeline)
 else:

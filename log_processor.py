@@ -1,4 +1,4 @@
-import time, pymongo, configparser, os, sys, json, socket, logging, datetime, kerberos
+import time, pymongo, configparser, os, sys, json, socket, logging, datetime, kerberos, re
 from pymongo.errors import DuplicateKeyError, OperationFailure
 
 LOG_FILE = 'log_progressor.log'
@@ -47,11 +47,11 @@ config.read('mongodb.config')
 if debug == True:
   logging.basicConfig(filename=LOG_FILE,level=logging.DEBUG)
   logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
-  logging.debug("AUDIT CONNECTION STRING: %s" % audit_db_connection_string)
+  logging.debug("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', audit_db_connection_string))
   logging.debug("AUDIT LOG: %s" % audit_log)
   logging.debug("OPS EVENTS: %s" % elevated_ops_events)
   logging.debug("APP EVENTS: %s" % elevated_app_events)
-  print("AUDIT CONNECTION STRING: %s" % audit_db_connection_string)
+  print("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', audit_db_connection_string))
   print("AUDIT LOG: %s" % audit_log)
   print("OPS EVENTS: %s" % elevated_ops_events)
   print("APP EVENTS: %s" % elevated_app_events)
