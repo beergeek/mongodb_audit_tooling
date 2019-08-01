@@ -15,7 +15,15 @@ config.read('config_watcher.conf')
 try:
   debug = config.getboolean('general','debug', fallback=False)
   ops_manager_connection_string = config.get('ops_manager_db','connection_string')
+  ops_manage_ssl = config.getboolean('ops_manager_db','ssl_enabled',fallback=False)
+  if ops_manage_ssl is True:
+    ops_manage_ssl_pem = config.get('ops_manager_db','ssl_pem_path')
+    ops_manage_ssl_ca = config.get('ops_manager_db', 'ssl_ca_cert_path')
   audit_db_connection_string = config.get('audit_db','connection_string')
+  audit_db_ssl = config.getboolean('audit_db','ssl_enabled',fallback=False)
+  if audit_db_ssl is True:
+    audit_db_ssl_pem = config.get('audit_db','ssl_pem_path')
+    audit_db_ssl_ca = config.get('audit_db', 'ssl_ca_cert_path')
   ops_manager_timeout = config.getint('ops_manager_db','timeout', fallback=100000)
   audit_db_timeout = config.getint('audit_db','timeout', fallback=100000)
   temp_pipeline = config.get('ops_manager_db','event_pipeline',fallback=None)
@@ -77,8 +85,17 @@ else:
   logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
 
 # connection to the Ops Manager replica set
-ops_manager_client = pymongo.MongoClient(ops_manager_connection_string, serverSelectionTimeoutMS=ops_manager_timeout)
 try:
+  if ops_manage_ssl is True:
+    if debug is True:
+      logging.debug("Using SSL/TLS to OM DB")
+      print("Using SSL/TLS to OM DB")
+    ops_manager_client = pymongo.MongoClient(ops_manager_connection_string, serverSelectionTimeoutMS=ops_manager_timeout, ssl=True, ssl_certfile=ops_manage_ssl_pem, ssl_ca_certs=ops_manage_ssl_ca)
+  else:
+    if debug is True:
+      logging.debug("Not ussing SSL/TLS to OM DB")
+      print("Not using SSL/TLS to OM DB")
+    ops_manager_client = pymongo.MongoClient(ops_manager_connection_string, serverSelectionTimeoutMS=ops_manager_timeout)
   result = ops_manager_client.admin.command('ismaster')
 except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure) as e:
   logging.error("Cannot connect to Ops Manager DB, please check settings in config file: %s" %e)
@@ -89,8 +106,17 @@ ops_manager_db = ops_manager_client['cloudconf']
 ops_manager_collection = ops_manager_db['config.appState']
 
 # conneciton to the audit database
-audit_client = pymongo.MongoClient(audit_db_connection_string, serverSelectionTimeoutMS=audit_db_timeout)
 try:
+  if audit_db_ssl is True:
+    if debug is True:
+      logging.debug("Using SSL/TLS to Audit DB")
+      print("Using SSL/TLS to Audit DB")
+    audit_client = pymongo.MongoClient(audit_db_connection_string, serverSelectionTimeoutMS=audit_db_timeout, ssl=True, ssl_certfile=audit_db_ssl_pem, ssl_ca_certs=audit_db_ssl_ca)
+  else:
+    if debug is True:
+      logging.debug("Not ussing SSL/TLS to Audit DB")
+      print("Not using SSL/TLS to Audit DB")
+    audit_client = pymongo.MongoClient(audit_db_connection_string, serverSelectionTimeoutMS=audit_db_timeout)
   result = audit_client.admin.command('ismaster')
 except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure) as e:
   logging.error("Cannot connect to Audit DB, please check settings in config file: %s" %e)

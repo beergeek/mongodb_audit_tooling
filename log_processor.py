@@ -1,5 +1,6 @@
 import time, pymongo, configparser, os, sys, json, socket, logging, datetime, kerberos, re
 from pymongo.errors import DuplicateKeyError, OperationFailure
+from bson.json_util import loads
 
 LOG_FILE = 'log_progressor.log'
 
@@ -14,6 +15,10 @@ config.read('log_processor.conf')
 try:
   debug = config.getboolean('general','debug', fallback=False)
   audit_db_connection_string = config.get('audit_db','connection_string')
+  audit_db_ssl = config.getboolean('audit_db','ssl_enabled',fallback=False)
+  if audit_db_ssl is True:
+    audit_db_ssl_pem = config.get('audit_db','ssl_pem_path')
+    audit_db_ssl_ca = config.get('audit_db', 'ssl_ca_cert_path')
   audit_db_timeout = config.getint('audit_db','timeout', fallback=100000)
   elevated_ops_events = config.get('general','elevated_ops_events',fallback='').split(',')
   elevated_app_events = config.get('general','elevated_app_events',fallback='').split(',')
@@ -59,8 +64,17 @@ else:
   logging.basicConfig(filename=LOG_FILE,level=logging.INFO)
   logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
 
-client = pymongo.MongoClient(audit_db_connection_string,serverSelectionTimeoutMS=audit_db_timeout)
 try:
+  if audit_db_ssl is True:
+    if debug is True:
+      logging.debug("Using SSL/TLS")
+      print("Using SSL/TLS")
+    client = pymongo.MongoClient(audit_db_connection_string, serverSelectionTimeoutMS=audit_db_timeout, ssl=True, ssl_certfile=audit_db_ssl_pem, ssl_ca_certs=audit_db_ssl_ca)
+  else:
+    if debug is True:
+      logging.debug("Not ussing SSL/TLS")
+      print("Not using SSL/TLS")
+    client = pymongo.MongoClient(audit_db_connection_string, serverSelectionTimeoutMS=audit_db_timeout)
   result = client.admin.command('ismaster')
 except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure) as e:
   logging.error("Cannot connect to Audit DB, please check settings in config file: %s" %e)
@@ -108,9 +122,10 @@ while 1:
         time.sleep(1)
         f.seek(where)
     else:
+        # retrieve and clean line (if required)
+        clean_line = clean_data(loads(line))
+
         # Insert tags as required
-        dirty_line = json.loads(line)
-        clean_line = clean_data(dirty_line)
         if clean_line['atype'] in elevated_ops_events:
           clean_line['tag'] = 'OPS EVENT'
         elif clean_line['atype'] in elevated_app_events:

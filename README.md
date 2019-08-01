@@ -24,6 +24,9 @@ The configuration file has the following format (__NOTE__: none of the string ha
 [audit_db]
 connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>&<OTHER_OPTIONS>
 timeout=<TIMEOUT_VALUE>
+ssl_enabled=<BOOLEAN_VALUE>
+ssl_pem_path=<PATH_TO_PEM_FILE>
+ssl_ca_cert_path=<PATH_TO_CA_CERT>
 
 [general]
 debug=<BOOLEAN_VALUE>
@@ -38,6 +41,9 @@ Example:
 [audit_db]
 connection_string=mongodb://auditor%%40MONGODB.LOCAL@mongod0.mongodb.local:27017/?replicaSet=repl0&authSource=$external&authMechanism=GSSAPI
 timeout=1000
+ssl_enabled=True
+ssl_pem_path=/data/pki/mongod3.mongodb.local.pem
+ssl_ca_cert_path=/data/pki/ca.cert
 
 [general]
 debug=True
@@ -48,7 +54,7 @@ elevated_app_events=dropCollection,dropDatabase
 
 NOTE that URL encoded special characters require double `%`, e.g `@` would be `%%40`.
 
-Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly).
+Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly). SSL/TLS settings are optional, but if `ssl_enabled` is `True` then `ssl_pem_path` and `ssl_ca_cert_path` must exist.
 
 The `elevated_app_events` and `elevated_ops_events` are comma separated lists of events that will be either tagged as `APP EVENT` or `OPS EVENT` respectively for easy querying in the audit database. The `audit_log` option, which is optional, is the path, including file name, to the MongoDB instance audit log, the default is `audit.log` in the directory where the script resides.
 
@@ -64,11 +70,17 @@ The configuration file has the following format (__NOTE__: none of the string ha
 [audit_db]
 connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>&<OTHER_OPTIONS>
 timeout=<TIMEOUT_VALUE>
+ssl_enabled=<BOOLEAN_VALUE>
+ssl_pem_path=<PATH_TO_PEM_FILE>
+ssl_ca_cert_path=<PATH_TO_CA_CERT>
 
 [ops_manager_db]
 connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>&<OTHER_OPTIONS>
 timeout=<TIMEOUT_VALUE>
 event_pipeline=<MONGODB_PIPELINE>
+ssl_enabled=<BOOLEAN_VALUE>
+ssl_pem_path=<PATH_TO_PEM_FILE>
+ssl_ca_cert_path=<PATH_TO_CA_CERT>
 
 [general]
 debug=<BOOLEAN_VALUE>
@@ -78,7 +90,7 @@ NOTE that URL encoded special characters require double `%`, e.g `@` would be `%
 
 An example that is similar to this script can be found in the section below.
 
-Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly). The optional `event_pipeline` is a change stream pipeline to filter events.
+Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly). The optional `event_pipeline` is a change stream pipeline to filter events. SSL/TLS settings for both databases are optional, but if `ssl_enabled` is `True` then `ssl_pem_path` and `ssl_ca_cert_path` must exist. SSL/TLS default is `False`.
 
 ## event_watcher
 
@@ -92,11 +104,17 @@ The configuration file has the following format (__NOTE__: none of the string ha
 [audit_db]
 connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>&<OTHER_OPTIONS>
 timeout=<TIMEOUT_VALUE>
+ssl_enabled=<BOOLEAN_VALUE>
+ssl_pem_path=<PATH_TO_PEM_FILE>
+ssl_ca_cert_path=<PATH_TO_CA_CERT>
 
 [ops_manager_db]
 connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>&<OTHER_OPTIONS>
 timeout=<TIMEOUT_VALUE>
 event_pipeline=<MONGODB_PIPELINE>
+ssl_enabled=<BOOLEAN_VALUE>
+ssl_pem_path=<PATH_TO_PEM_FILE>
+ssl_ca_cert_path=<PATH_TO_CA_CERT>
 
 [general]
 debug=<BOOLEAN_VALUE>
@@ -108,11 +126,17 @@ An example:
 [audit_db]
 connection_string=mongodb://auditor%%40MONGODB.LOCAL@om.mongodb.local:27017/?replicaSet=repl0&authSource=$external&authMechanism=GSSAPI
 timeout=2000
+ssl_enabled=True
+ssl_pem_path=/data/pki/mongod3.mongodb.local.pem
+ssl_ca_cert_path=/data/pki/ca.cert
 
 [ops_manager_db]
 connection_string=mongodb://auditwriter%%40MONGODB.LOCAL@audit.mongodb.local:27017?replicaSet=audit&authSource=$external&authMechanism=GSSAPI
 timeout=1000
 event_pipeline=[{'$match': {'fullDocument.un': {$in: ['ivan','vigyan','mac']}}]
+ssl_enabled=True
+ssl_pem_path=/data/pki/mongod3.mongodb.local.pem
+ssl_ca_cert_path=/data/pki/ca.cert
 
 [general]
 debug=False
@@ -120,7 +144,9 @@ debug=False
 
 NOTE that URL encoded special characters require double `%`, e.g `@` would be `%%40`.
 
-Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly). The optional `event_pipeline` is a change stream pipeline to filter events.
+An example that is similar to this script can be found in the section below.
+
+Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly). The optional `event_pipeline` is a change stream pipeline to filter events. SSL/TLS settings for both databases are optional, but if `ssl_enabled` is `True` then `ssl_pem_path` and `ssl_ca_cert_path` must exist. SSL/TLS default is `False`.
 
 ## Permissions
 
