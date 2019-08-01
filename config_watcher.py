@@ -73,7 +73,7 @@ if debug == True:
   logging.basicConfig(filename=LOG_FILE,level=logging.DEBUG)
   logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
   logging.debug("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', audit_db_connection_string))
-  logging.debug("CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',ops_manager_connection_string))
+  logging.debug("OPS MANAGER CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',ops_manager_connection_string))
   logging.debug("RESUME TOKEN: %s" % resume_token)
   logging.debug("PIPELINE: %s" % pipeline)
   print("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', audit_db_connection_string))
