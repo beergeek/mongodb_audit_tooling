@@ -45,7 +45,12 @@ audit_log=/data/logs/audit_log
 elevated_ops_events=shutdown
 elevated_app_events=dropCollection,dropDatabase
 ```
-Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly). The `elevated_app_events` and `elevated_ops_events` are comma separated lists of events that will be either tagged as `APP EVENT` or `OPS EVENT` respectively for easy querying in the audit database. The `audit_log` option, which is optional, is the path, including file name, to the MongoDB instance audit log, the default is `audit.log` in the directory where the script resides.
+
+NOTE that URL encoded special characters require double `%`, e.g `@` would be `%%40`.
+
+Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly).
+
+The `elevated_app_events` and `elevated_ops_events` are comma separated lists of events that will be either tagged as `APP EVENT` or `OPS EVENT` respectively for easy querying in the audit database. The `audit_log` option, which is optional, is the path, including file name, to the MongoDB instance audit log, the default is `audit.log` in the directory where the script resides.
 
 ## config_watcher
 
@@ -68,6 +73,8 @@ event_pipeline=<MONGODB_PIPELINE>
 [general]
 debug=<BOOLEAN_VALUE>
 ```
+
+NOTE that URL encoded special characters require double `%`, e.g `@` would be `%%40`.
 
 An example that is similar to this script can be found in the section below.
 
@@ -110,6 +117,8 @@ event_pipeline=[{'$match': {'fullDocument.un': {$in: ['ivan','vigyan','mac']}}]
 [general]
 debug=False
 ```
+
+NOTE that URL encoded special characters require double `%`, e.g `@` would be `%%40`.
 
 Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly). The optional `event_pipeline` is a change stream pipeline to filter events.
 
