@@ -1,6 +1,10 @@
-import time, pymongo, configparser, os, sys, json, socket, logging, datetime, kerberos, re
-from pymongo.errors import DuplicateKeyError, OperationFailure
-from bson.json_util import loads
+try:
+  import time, pymongo, configparser, os, sys, json, socket, logging, datetime, kerberos, re
+  from pymongo.errors import DuplicateKeyError, OperationFailure
+  from bson.json_util import loads
+except ImportError as e:
+  print(e)
+  exit(1)
 
 LOG_FILE = 'log_progressor.log'
 
@@ -93,7 +97,7 @@ def clean_data(unclean_json):
         v = clean_data(v)
       if type(v) is list:
         v = clean_list_data(v)
-      if k[0] in [ '$', '*']:
+      if k[0] in [ '$', '*'] and k not in ['$data', '$code', '$binary','$decimal128', '$int64', '$min_key','$max_key','$objectid','$regex', '$timestamp']:
         if debug:
           logging.debug("ISSUE: %s" % k)
           print('\033[91m' + ("ISSUE: %s" % k) + '\033[m')
@@ -113,7 +117,7 @@ def clean_list_data(unclean_data):
 
 while os.path.isfile(audit_log) == False:
   time.sleep(10)
-f = open(audit_log, "r")
+f = open(audit_log, "rb")
 while 1:
   try:
     where = f.tell()

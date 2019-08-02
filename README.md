@@ -7,6 +7,7 @@ The following tools are in this repository:
 * log_processor (to process the audit logs from MongoDB instance and forward to a MongoDB audit database)
 * config_watcher (to retrieve configuration changes to Ops Manager and forward to a MongoDB audit database)
 * event_watcher (to retrieve audit events from Ops Manager and forward to a MongoDB audit database)
+* deployment_configs (to retrieve all the deployment configurations from Ops Manager)
 
 # Details
 
@@ -39,7 +40,7 @@ Example:
 
 ```shell
 [audit_db]
-connection_string=mongodb://auditor%%40MONGODB.LOCAL@mongod0.mongodb.local:27017/?replicaSet=repl0&authSource=$external&authMechanism=GSSAPI
+connection_string=mongodb://auditor%%40MONGODB.LOCAL@audit.mongodb.local:27017/?replicaSet=repl0&authSource=$external&authMechanism=GSSAPI
 timeout=1000
 ssl_enabled=True
 ssl_pem_path=/data/pki/mongod3.mongodb.local.pem
@@ -148,6 +149,62 @@ An example that is similar to this script can be found in the section below.
 
 Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 1000 and False respectivetly). The optional `event_pipeline` is a change stream pipeline to filter events. SSL/TLS settings for both databases are optional, but if `ssl_enabled` is `True` then `ssl_pem_path` and `ssl_ca_cert_path` must exist. SSL/TLS default is `False`.
 
+## deployment_configs
+
+The script retrieves the deployment configurations from Ops Manager via the API.
+
+The script uses a configuration file (`deployment_configs.conf`) that must reside in the same location as the script.
+
+The configuration file has the following format (__NOTE__: none of the string have quotes):
+
+```shell
+[ops_manager]
+baseurl=https://<HOST>:<PORT>
+username=<API_USERNAME>
+token=<API_USER_TOKEN>
+timeout=<TIMEOUT_VALUE>
+ssl_pem_path=<PATH_TO_PEM_FILE>
+ssl_ca_cert_path=<PATH_TO_CA_CERT>
+
+[audit_db]
+connection_string=mongodb://<USERNAME>:<PASSWORD>@<HOST>:<PORT>/?replicaSet=<REPLICA_SET_NAME>&<OTHER_OPTIONS>
+timeout=<TIMEOUT_VALUE>
+ssl_enabled=<BOOLEAN_VALUE>
+ssl_pem_path=<PATH_TO_PEM_FILE>
+ssl_ca_cert_path=<PATH_TO_CA_CERT>
+
+[general]
+debug=<BOOLEAN_VALUE>
+```
+
+Example:
+
+```shell
+[ops_manager]
+baseurl=https://mongod0.mongodb.local:8443
+username=auditor
+token=8ce50f02-4292-460e-82a5-000a074218ba
+timeout=1000
+ssl_ca_cert_path=/data/pki/ca.cert
+ssl_pem_path=/data/pki/auditor.mongodb.local.pem
+
+[audit_db]
+connection_string=mongodb://auditwriter%%40MONGODB.LOCAL@audit.mongodb.local:27017/?replicaSet=repl0&authSource=$external&authMechanism=GSSAPI
+timeout=1000
+ssl_enabled=True
+ssl_ca_cert_path=/data/pki/ca.cert
+ssl_pem_path=/data/pki/auditor.mongodb.local.pem
+
+[general]
+debug=True
+```
+
+NOTE that URL encoded special characters require double `%`, e.g `@` would be `%%40`.
+
+All sections are mandatory. The `baseurl`, `username`, and `token` options within the `ops_manager` section and `connection_string` option within `audit_db` section are mandatory. The the `timeout` and `debug` options (having defaults of 1000 and False respectivetly) are optional.
+
+Both the `ops_manager` and `audit_db` sections have the optional `ssl_ca_cert_path` and `ssl_pem_path` settings. The `audit_db` section also has `ssl_enabled` which must be set to `True` for SSL/TLS. For the Ops Manager API the SSL/TLS setting is determined by using `https` in the `baseurl` optional.
+
 ## Permissions
 
 For all of the scripts, the user that is writing to the MongoDB audit database must have `readWrite` permissions on the `logging` database and `log` collection.
@@ -157,3 +214,15 @@ For the `log_processor` script the user executing the script will need to be abl
 For the `config_watcher` script the user will need to have `read` privileges on the `config.appState` collection within the `cloudconf` database in the Ops Manager application database.
 
 For the `event_watcher` script the user will need to have `read` privileges on the `data.events` collection within the `mmsdb` database in the Ops Manager application database.
+
+For the `deployment_configs` script will only retrieve deployments that the API user has permissions to access.
+
+## Setup
+
+The following non-standard Python modules are required:
+
+* pymongo
+* kerberos
+* configparser
+* bson
+
