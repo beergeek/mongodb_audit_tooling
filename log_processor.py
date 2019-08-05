@@ -6,7 +6,21 @@ except ImportError as e:
   print(e)
   exit(1)
 
-LOG_FILE = 'log_progressor.log'
+LOG_FILE = 'log_processor.log'
+ZERO = datetime.timedelta(0)
+HOUR = datetime.timedelta(hours=1)
+
+class UTC(datetime.tzinfo):
+  """UTC"""
+
+  def utcoffset(self, dt):
+    return ZERO
+
+  def tzname(self, dt):
+    return "UTC"
+
+  def dst(self, dt):
+    return ZERO
 
 # Get config setting from `log_processor.config` file
 if os.path.isfile('log_processor.conf') == False:
@@ -53,6 +67,28 @@ except configparser.NoSectionError as e:
 config = configparser.ConfigParser()
 config.read('mongodb.config')
 
+def create_tz_dtg(temp_time):
+  if sys.version_info[0] < 3:
+    utc_time = datetime.datetime.fromtimestamp(float(temp_time), UTC())
+  else:
+    utc_time = datetime.datetime.fromtimestamp(float(temp_time),datetime.datetime.timezone.utc)
+  return utc_time
+
+# Get resume token, is exists
+if os.path.isfile('.log_tokens'):
+  try:
+    token_file = open('.log_tokens','r')
+    temp_line = token_file.readline().strip()
+    resume_token = create_tz_dtg(temp_line)
+  except ValueError as e:
+    print('\033[91m' + "Incorrect format for timestamp: %s, reprocessing all data" % temp_line)
+    print('\033[m')
+    resume_token = create_tz_dtg(0)
+  finally:
+    token_file.close()
+else:
+  resume_token = create_tz_dtg(0)
+
 if debug == True:
   logging.basicConfig(filename=LOG_FILE,level=logging.DEBUG)
   logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
@@ -60,10 +96,12 @@ if debug == True:
   logging.debug("AUDIT LOG: %s" % audit_log)
   logging.debug("OPS EVENTS: %s" % elevated_ops_events)
   logging.debug("APP EVENTS: %s" % elevated_app_events)
+  logging.debug("RESUME TOKEN: %s" % resume_token)
   print("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', audit_db_connection_string))
   print("AUDIT LOG: %s" % audit_log)
   print("OPS EVENTS: %s" % elevated_ops_events)
   print("APP EVENTS: %s" % elevated_app_events)
+  print("RESUME TOKEN: %s" % resume_token)
 else:
   logging.basicConfig(filename=LOG_FILE,level=logging.INFO)
   logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
@@ -118,34 +156,54 @@ def clean_list_data(unclean_data):
 while os.path.isfile(audit_log) == False:
   time.sleep(10)
 f = open(audit_log, "rb")
-while 1:
-  try:
+try:
+  while 1:
     where = f.tell()
     line = f.readline()
     if not line:
         time.sleep(1)
         f.seek(where)
     else:
-        # retrieve and clean line (if required)
-        clean_line = clean_data(loads(line))
+      try:
+        # retrieve line
+        unclean_line = loads(line)
 
-        # Insert tags as required
-        if clean_line['atype'] in elevated_ops_events:
-          clean_line['tag'] = 'OPS EVENT'
-        elif clean_line['atype'] in elevated_app_events:
-          clean_line['tag'] = 'APP EVENT'
-        clean_line['host'] = socket.gethostname()
-        clean_line['source'] = 'DATABASE AUDIT'
-        try:
-          # insert data
-          if debug:
-            print(clean_line)
-          collection.insert_one(clean_line)
-        except OperationFailure as e:
-          print(e.details)
-  except ValueError as e:
-    print(e)
-    continue
-  finally:
-    logging.info("TERMINATING PROCESSING: %s" % datetime.datetime.now())
-    
+        # check if this was our last resume token
+        if (unclean_line['ts'] > resume_token):
+          # clean line (if required)
+          clean_line = clean_data(unclean_line)
+
+          # Insert tags as required
+          if clean_line['atype'] in elevated_ops_events:
+            clean_line['tag'] = 'OPS EVENT'
+          elif clean_line['atype'] in elevated_app_events:
+            clean_line['tag'] = 'APP EVENT'
+          clean_line['host'] = socket.gethostname()
+          clean_line['source'] = 'DATABASE AUDIT'
+          resume_token = clean_line['ts']
+          try:
+            # insert data
+            if debug:
+              print(clean_line)
+              print(resume_token)
+            collection.insert_one(clean_line)
+          except OperationFailure as e:
+            print(e.details)
+        else:
+          if debug is True:
+            print("Datestamp already seen: %s" % unclean_line['ts'])
+      except ValueError as e:
+        print('\033[91m' + ("Value Error: %s\nDocument: %s" % (e, unclean_line)) + '\033[m')
+        continue
+finally:
+  if resume_token:
+    if sys.version_info[0] < 3:
+      p = format(time.mktime(resume_token.timetuple()), '.1f')
+    else:
+      p = datetime.datetime.timestamp(resume_token)
+    if debug is True:
+      print("OUT TOKEN: %s" % p)
+    outfile = open('.log_tokens', 'w')
+    outfile.write(p)
+    outfile.close()
+  logging.info("TERMINATING PROCESSING: %s" % datetime.datetime.now())
