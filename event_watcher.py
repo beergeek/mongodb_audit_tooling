@@ -138,7 +138,8 @@ try:
     resume_token = document.get("_id")['_data']
     document['tag'] = 'OPS EVENT'
     document['host'] = 'OPS MANAGER'
-    document['source'] = 'OPS MANAGER EVENTS'
+    document['source'] = 'DEPLOYMENT EVENT'
+    document['ts'] = document['fullDocument']['cre']
     if DEBUG:
       logging.debug("RESUME_TOKEN: %s" % resume_token)
       print("RESUME_TOKEN: %s" % resume_token)

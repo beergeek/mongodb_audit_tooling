@@ -2,7 +2,6 @@ try:
   import requests
   import configparser
   from requests.auth import HTTPDigestAuth
-  import argparse
   import json
   import time
   import subprocess

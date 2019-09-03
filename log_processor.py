@@ -144,13 +144,13 @@ def clean_data(unclean_json):
 
 def clean_list_data(unclean_data):
   if type(unclean_data) is list:
-    for index, value in unclean_data:
+    for value in unclean_data:
       if debug:
         logging.debug("ELEMENT: %s" % value)
         print("ELEMENT: %s" % value)
       if type(value) is dict:
         print("ANOTHER DICT: %s" % value)
-        unclean_data[index] = clean_data(value)
+        unclean_data[unclean_data.index(value)] = clean_data(value)
   return unclean_data
 
 while os.path.isfile(audit_log) == False:
@@ -179,7 +179,7 @@ try:
           elif clean_line['atype'] in elevated_app_events:
             clean_line['tag'] = 'APP EVENT'
           clean_line['host'] = socket.gethostname()
-          clean_line['source'] = 'DATABASE AUDIT'
+          clean_line['source'] = 'DATABASE EVENT'
           resume_token = clean_line['ts']
           try:
             # insert data
