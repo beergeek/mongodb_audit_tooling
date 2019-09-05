@@ -1,6 +1,6 @@
 <!DOCTYPE html>
   <head>
-    <title>Finances</title>
+    <title>Reports</title>
     <link rel="stylesheet" href='../static/style.css'/>
     <meta charset="utf-8" />
   </head>
@@ -16,12 +16,20 @@
         };  
         function setUTCHighHost() {
           document.getElementById('dtg_fixed_high_host').value = new Date(document.getElementById('dtg_high_host').value).toUTCString();
+        };   
+        function setUTCLowDeployment() {
+          document.getElementById('dtg_fixed_low_deployment').value = new Date(document.getElementById('dtg_low_deployment').value).toUTCString();
         };  
+        function setUTCHighDeployment() {
+          document.getElementById('dtg_fixed_high_deployment').value = new Date(document.getElementById('dtg_high_deployment').value).toUTCString();
+        }; 
         function getDate() {
           getDateLow();
           getDateHigh();
           getDateLowHost();
           getDateHighHost();
+          getDateLowDeployment();
+          getDateHighDeployment();
         }
         function getDateLow(){
           x = new Date();
@@ -45,11 +53,22 @@
           document.getElementById("dtg_high_host").value = x;
           document.getElementById("dtg_fixed_high_host").value = x.toUTCString();
         };
+        function getDateLowDeployment(){
+          x = new Date();
+          x.setMonth(x.getMonth() - 3);
+          document.getElementById("dtg_low_deployment").value = x;
+          document.getElementById("dtg_fixed_low_deployment").value = x.toUTCString();
+        };
+        function getDateHighDeployment(){
+          x = new Date();
+          document.getElementById("dtg_high_deployment").value = x;
+          document.getElementById("dtg_fixed_high_deployment").value = x.toUTCString();
+        };
       </script>
       <body onload="getDate();">
     <h1>Reports</h1>
     <form action="./user_report" method="GET">
-      <h2>User Report</h2>
+      <h2>PAUM Report</h2>
       <table>
         <tr>
           <td>User</td>
@@ -74,7 +93,7 @@
       <input type="submit" value="Submit">
     </form>
     <form action="./host_report" method="GET">
-      <h2>Host Report</h2>
+      <h2>CCA Report</h2>
       <table>
         <tr>
           <td>Host</td>
@@ -93,6 +112,31 @@
         <tr>
           <td>End Datetime:</td>
           <td><input id="dtg_high_host" onchange="setUTCHighHost()" type="text" required name="dtg_high_host" value="" size="50"/> / <input id="dtg_fixed_high_host" type="text" readonly name="dtg_fixed_high_host" value="" size="35"/></td>
+        </tr>
+      </table>
+      <br>
+      <input type="submit" value="Submit">
+    </form>
+    <form action="./deployment_report" method="GET">
+      <h2>ISCC Report</h2>
+      <table>
+        <tr>
+          <td>Deployment</td>
+          <td>
+          <select name=deployment>
+              {% for deployment in deployments %}
+              <option value="{{deployment}}">{{deployment}}</option>
+              {% endfor %}
+          </select>
+        </td>
+        </tr>
+        <tr>
+          <td>Start Datetime:</td>
+          <td><input id="dtg_low_deployment" onchange="setUTCLowDeployment()" type="text" required name="dtg_low_deployment" value="" size="50"/> / <input id="dtg_fixed_low_deployment" type="text" readonly name="dtg_fixed_low_deployment" value="" size="35"/></td>
+        </tr>
+        <tr>
+          <td>End Datetime:</td>
+          <td><input id="dtg_high_deployment" onchange="setUTCHighDeployment()" type="text" required name="dtg_high_deployment" value="" size="50"/> / <input id="dtg_fixed_high_deployment" type="text" readonly name="dtg_fixed_high_deployment" value="" size="35"/></td>
         </tr>
       </table>
       <br>

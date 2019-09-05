@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+  <head>
+    <title>Reports</title>
+    <link rel="stylesheet" href='../static/style.css'/>
+    <meta charset="utf-8" />
+  </head>
+  <body>
+    <h1>ISCC Report for {{deployment}}</h1>
+      <p>Between {{low_date}} and {{high_date}}</p>
+      <table>
+        <th>Timestamp</th>
+        <th>Config Status</th>
+        <th>Hosts</th>
+      {% for event in events %}
+      <tr>
+        <td><a href="./deployment_event_details/{{event['_id']}}" target="_blank"><script>document.write(new Date("{{event['ts']}}"));</script></a></td>
+        <td><pre id="evil">{{event['out_of_spec']}}</pre></td>
+        <td><pre>{{event['hosts']}}</pre></td>
+      </tr>
+      {% endfor %}
+      </table>
+      <br>
+  </body>
+</html>

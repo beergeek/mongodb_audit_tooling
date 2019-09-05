@@ -2,6 +2,7 @@ try:
   import time, pymongo, configparser, os, sys, json, socket, logging, datetime, kerberos, re
   from pymongo.errors import DuplicateKeyError, OperationFailure
   from bson.json_util import loads
+  from pprint import pprint
 except ImportError as e:
   print(e)
   exit(1)
@@ -39,6 +40,7 @@ try:
     audit_db_ssl_ca = config.get('audit_db', 'ssl_ca_cert_path')
   audit_db_timeout = config.getint('audit_db','timeout', fallback=100000)
   elevated_ops_events = config.get('general','elevated_ops_events',fallback='').split(',')
+  elevated_config_events = config.get('general','elevated_config_events',fallback='').split(',')
   elevated_app_events = config.get('general','elevated_app_events',fallback='').split(',')
   audit_log = config.get('general','audit_log',fallback='audit.log')
 except configparser.NoOptionError as e:
@@ -94,6 +96,7 @@ if debug == True:
   logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
   logging.debug("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', audit_db_connection_string))
   logging.debug("AUDIT LOG: %s" % audit_log)
+  logging.debug("CONFIG EVENTS: %s" % elevated_config_events)
   logging.debug("OPS EVENTS: %s" % elevated_ops_events)
   logging.debug("APP EVENTS: %s" % elevated_app_events)
   logging.debug("RESUME TOKEN: %s" % resume_token)
@@ -149,10 +152,14 @@ def clean_list_data(unclean_data):
         logging.debug("ELEMENT: %s" % value)
         print("ELEMENT: %s" % value)
       if type(value) is dict:
-        print("ANOTHER DICT: %s" % value)
+        if debug:
+          logging.debug("ANOTHER DICT: %s" % value)
+          print("ANOTHER DICT: %s" % value)
         unclean_data[unclean_data.index(value)] = clean_data(value)
   return unclean_data
 
+# set for a new start or restart
+restart = True
 while os.path.isfile(audit_log) == False:
   time.sleep(10)
 f = open(audit_log, "rb")
@@ -167,25 +174,31 @@ try:
       try:
         # retrieve line
         unclean_line = loads(line)
+        if debug:
+          print("CURRENT TS: %s" % unclean_line['ts'])
 
-        # check if this was our last resume token
-        if (unclean_line['ts'] > resume_token):
+        # check if this was our last resume token or restart is not true
+        # On restart we do not want to process the same data again
+        if (unclean_line['ts'] > resume_token) or restart == False:
+          restart = False
           # clean line (if required)
           clean_line = clean_data(unclean_line)
 
           # Insert tags as required
-          if clean_line['atype'] in elevated_ops_events:
+          if ('command' in clean_line['param'] and clean_line['param']['command'] in elevated_config_events) or clean_line['atype'] in elevated_config_events:
+            clean_line['tag'] = 'CONFIG EVENT'
+          if 'command' in clean_line['param'] and clean_line['param']['command'] in elevated_ops_events:
             clean_line['tag'] = 'OPS EVENT'
-          elif clean_line['atype'] in elevated_app_events:
+          elif 'command' in clean_line['param'] and clean_line['param']['command'] in elevated_app_events:
             clean_line['tag'] = 'APP EVENT'
           clean_line['host'] = socket.gethostname()
-          clean_line['source'] = 'DATABASE EVENT'
+          clean_line['source'] = 'DATABASE AUDIT'
           resume_token = clean_line['ts']
           try:
             # insert data
             if debug:
               print(clean_line)
-              print(resume_token)
+              print("RESUME TOKEN: %s" % resume_token)
             collection.insert_one(clean_line)
           except OperationFailure as e:
             print(e.details)

@@ -22,6 +22,8 @@ except ImportError as e:
   exit(1)
 
 LOG_FILE = 'deployment_configs.log'
+STANDARD_PROJECT = {"kerberos" : {"serviceName" : "mongodb"},"auth" : {"autoAuthMechanisms" : ["MONGODB-CR"],"autoAuthMechanism" : "MONGODB-CR"},"ssl" : {"clientCertificateMode" : "OPTIONAL","CAFilePath" : "/data/pki/ca.cert","autoPEMKeyFilePath" : "/etc/mongodb-mms/aa.pem"}}
+STANDARD_PROCESS = { "authSchemaVersion" : 5, "kerberos" : { "keytab" : "/data/pki/server_keytab" }, "manualMode" : False, "disabled" : False, "logRotate" : { "timeThresholdHrs" : 24, "sizeThresholdMB" : 1000 }, "version" : "3.6.13-ent", "args2_6" : { "net" : { "ssl" : { "mode" : "requireSSL" }, "port" : 27017, "bindIpAll" : True }, "storage" : { "wiredTiger" : { "engineConfig" : { "directoryForIndexes" : True }}, "dbPath" : "/data/db", "directoryPerDB" : True }, "security" : { "encryptionKeyFile" : "/data/pki/mongodb_keyfile", "enableEncryption" : True }, "systemLog" : { "path" : "/data/logs/mongodb.log", "destination" : "file" } }, "featureCompatibilityVersion" : "3.6" }
 
 # Get config setting from `event_watcher.config` file
 if os.path.isfile('deployment_configs.conf') == False:
@@ -125,32 +127,106 @@ def get(endpoint):
     print(resp.text)
     raise requests.exceptions.RequestException
 
+def check_dict(root, s_dict, comp_dict):
+  failure_data = []
+  if type(s_dict) is dict:
+    for ks, vs in s_dict.items():
+      if root == '':
+        k = ks
+      else:
+        k = root + '.' + ks
+      vd = comp_dict.get(ks, None)
+      if not vd:
+        if DEBUG:
+          print("\033[91mSadness: `%s: %s` is missing for the deployment\033[m" % (k,vs))
+        failure_data.append("`%s: %s` is missing for the deployment" % (k,vs))
+        continue
+      if type(vs) is dict:
+        if type(vd) is dict:
+          failure_data = failure_data + check_dict(k, vs, vd)
+        else:
+          if DEBUG:
+            print("\033[91mSadness: `%s: %s`, should be `%s`\033[m" % (k , vd, vs))
+          failure_data.append("`%s: %s`, should be `%s`" % (k , vd, vs))
+      elif type(vs) is list:
+        if type(vd) is list:
+          failure_data = failure_data + check_list(k , vs, vd)
+        else:
+          if DEBUG:
+            print("\033[91mSadness: `%s: %s, should be %s`\033[m" % (k , vd, vs))
+          failure_data.append("`%s: %s`, should be `%s`" % (k , vd, vs))
+      elif vs != vd:
+        if DEBUG:
+          print("\033[91mSadness: `%s: %s, should be %s`\033[m" % (k , vd, vs))
+        failure_data.append("`%s: %s`, should be `%s`" % (k , vd, vs))
+  return failure_data
+
+def check_list(k, s_array, d_array):
+  failure_data = []
+  if type(s_array) is list and type(d_array) is list:
+    s_array.sort()
+    d_array.sort()
+    for index, vs in enumerate(s_array):
+      vd = d_array[index] if index < len(d_array) else None
+      if not vd:
+        if DEBUG:
+          print("\033[91mSadness: `%s:%s` is missing for the deployment\033[m" % (k, vs))
+        failure_data.append("`%s: %s` is missing for the deployment" % (k,vs))
+        break
+      if type(vs) is dict:
+          if type(vd) is dict:
+            failure_data = failure_data + check_dict(k, vs, vd)
+          else:
+            if DEBUG:
+              print("\033[91mSadness: `%s: %s, should be %s`\033[m" % (k , vd, vs))
+            failure_data.append("`%s: %s`, should be `%s`" % (k , vd, vs))
+      if type(vs) is list:
+          if type(vd) is list:
+            failure_data = failure_data + check_list(k, vs, vd)
+          else:
+            if DEBUG:
+              print("\033[91mSadness: `%s: %s, should be %s`\033[m" % (k , vd, vs))
+            failure_data.append("`%s: %s`, should be `%s`" % (k , vd, vs))
+      elif vs != vd:
+        if DEBUG:
+          print("\033[91mSadness: `%s: %s, should be %s`\033[m" % (k, d_array, s_array))
+        failure_data.append("`%s: %s`, should be `%s`" % (k , vd, vs))
+        break
+  return failure_data
+
 def main():
   DEPLOYMENTS = get('/groups')
   for deployment in DEPLOYMENTS['results']:
-    deployment_id = deployment['id']
-    desired_state = get('/groups/' + deployment_id + '/automationConfig')
-    desired_state.pop('mongoDbVersions')
-    if 'key' in desired_state['auth']:
-      desired_state['auth']['key'] = '<REDACTED>'
-    if 'autoPwd' in desired_state['auth']:
-      desired_state['auth']['autoPwd'] = '<REDACTED>'
-    for user in desired_state['auth']['usersWanted']:
-      if 'pwd' in user:
-        user['pwd'] = '<REDACTED>'
-      if 'scramSha1Creds' in user:
-        user['scramSha1Creds'] = '<REDACTED>'
-      if 'scramSha256Creds' in user:
-        user['scramSha256Creds'] = '<REDACTED>'
-    
-    # write results to audit db
-    deployment['checkt_dtg'] = datetime.datetime.now()
-    if DEBUG is True:
-      print(desired_state)
-    try:
-      audit_collection.insert_one(desired_state)
-    except OperationFailure as e:
-      print(e.details)
-      logging.error(e.details)
+    desired_state = get('/groups/' + deployment['id'] + '/automationConfig')
+    desired_state['compliance'] = check_dict('', STANDARD_PROJECT, desired_state)
+    # Determine if project has any members
+    if desired_state['processes']:
+      for instance in desired_state['processes']:
+        compliance = check_dict("processes", STANDARD_PROCESS, instance)
+        if compliance:
+          desired_state['compliance'] = desired_state['compliance'] + compliance
+      desired_state['deployment'] = deployment['name'] + " - (ORG: " + deployment['orgId'] + ")" 
+      desired_state.pop('mongoDbVersions')
+      if 'key' in desired_state['auth']:
+        desired_state['auth']['key'] = '<REDACTED>'
+      if 'autoPwd' in desired_state['auth']:
+        desired_state['auth']['autoPwd'] = '<REDACTED>'
+      for user in desired_state['auth']['usersWanted']:
+        if 'pwd' in user:
+          user['pwd'] = '<REDACTED>'
+        if 'scramSha1Creds' in user:
+          user['scramSha1Creds'] = '<REDACTED>'
+        if 'scramSha256Creds' in user:
+          user['scramSha256Creds'] = '<REDACTED>'
+
+      # write results to audit db
+      desired_state['ts'] = datetime.datetime.now()
+      if DEBUG is True:
+        print(desired_state)
+      try:
+        audit_collection.insert_one(desired_state)
+      except OperationFailure as e:
+        print(e.details)
+        logging.error(e.details)
 
 if __name__ == "__main__": main()

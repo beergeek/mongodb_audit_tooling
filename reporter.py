@@ -1,5 +1,6 @@
 try:
   from flask import Flask, render_template, request, current_app, redirect, url_for
+  from collections import defaultdict
   import configparser
   import json
   import time
@@ -53,7 +54,7 @@ except configparser.NoOptionError as e:
 except configparser.NoSectionError as e:
   logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
   logging.error('The config file must include sections `audit_db` and `general`')
-  print('\033[91m' + "ERROR! The config file must include sections `audit_db` and `general`, such as:\n"
+  print('\033[91m' + "ERROR! The config file must include sections `audit_db`, and `general`, such as:\n"
     + '\033[92m'
     "[audit_db]\n"
     "connection_string=mongodb://username:password@host:port/?replicaSet=replicasetname\n"
@@ -96,6 +97,7 @@ except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFai
   sys.exit(1)
 audit_db = audit_client['logging']
 audit_collection = audit_db['logs']
+config_collection = audit_db['configs']
 
 # main route 
 @app.route("/")
@@ -139,17 +141,17 @@ def index():
     output0 = list(audit_collection.aggregate(user_list_pipeline))
     users = []
     for user in output0:
-      print(user)
       if 'Users' in user:
         users.append(user['Users'])
-    print(users)
     output1 = list(audit_collection.distinct("fullDocument.clusterConfig.cluster.processes.hostname"))
     hosts = []
     for host in output1:
-      print(host)
       hosts.append(host)
-    print(hosts)
-    return render_template('index.html', users=users, hosts=hosts)
+    output2 = list(config_collection.distinct("deployment"))
+    deployments = []
+    for deployment in output2:
+      deployments.append(deployment)
+    return render_template('index.html', users=users, hosts=hosts, deployments=deployments)
   except OperationFailure as e:
     print(e.details)
     logging.error(e.details)
@@ -175,9 +177,10 @@ def get_user():
           "_id": 1,
           "ts": 1,
           "source": 1,
-          "Changes": {"$ifNull": ["$fullDocument.deploymentDiff.diffs", "$param"]},
+          "Changes": {"$ifNull": [{"$arrayElemAt": ["$fullDocument.deploymentDiff.diffs.status",0]}, "$param.command"]},
           "Hosts": {"$ifNull": ["$fullDocument.clusterConfig.cluster.processes.hostname","$host"]},
-          "Type": {"$ifNull": ["$fullDocument._t", "$atype"]}
+          "Type": {"$ifNull": ["$fullDocument._t", "$atype"]},
+          "Other": "$fullDocument.et"
         }
       },
       {
@@ -194,6 +197,10 @@ def get_user():
       events.append(event)
       if 'Changes' in event:
         event['Changes'] = dumps(event['Changes'], indent=2)
+      elif 'Other' in event:
+        event['Changes'] = dumps(event['Other'], indent=2)
+      if 'Hosts' in event:
+        event['Hosts'] = dumps(event['Hosts'], indent=2)
     return render_template('user_events.html', events=events, low_date=request.args['dtg_fixed_low'], high_date=request.args['dtg_fixed_high'], user=request.args['user'])
   except OperationFailure as e:
     print(e.details)
@@ -242,7 +249,8 @@ def get_host():
               ]
             },
             {
-              "source": "DATABASE AUDIT"
+              "source": "DATABASE AUDIT",
+              "tag": "CONFIG EVENT"
             }
           ]
         }
@@ -255,7 +263,7 @@ def get_host():
             "$ifNull": [{ "$arrayElemAt": [ "$users.user", 0 ] }, "$fullDocument.un"]
           },
           "Events": {
-            "$ifNull": ["$param","$fullDocument.deploymentDiff.diffs"]
+            "$ifNull": ["$param.command",{"$arrayElemAt": ["$fullDocument.deploymentDiff.diffs.status",0]}]
           },
           "Hosts": {
             "$ifNull": ["$host","$fullDocument.clusterConfig.cluster.processes.hostname"]
@@ -277,7 +285,10 @@ def get_host():
     for event in event_output:
       if not ObjectId.is_valid(event['_id']):
         event['_id'] = event['_id']
-      event['Events'] = dumps(event['Events'], indent=2)
+      if 'Events' in event:
+        event['Events'] = dumps(event['Events'], indent=2)
+      else:
+        event['Event'] = 'None'
       events.append(event)
     return render_template('host_events.html', events=events, low_date=request.args['dtg_fixed_low_host'], high_date=request.args['dtg_fixed_high_host'], host=request.args['host'])
   except OperationFailure as e:
@@ -295,6 +306,51 @@ def get_host_event_details(oid):
   except OperationFailure as e:
     print(e.details)
 
+@app.route("/deployment_report", methods=["GET"])
+def get_deployment():
+  try:
+    deployment_pipeline = [
+      {
+        "$match": {
+          "deployment": request.args["deployment"]
+        }
+      },
+      {
+        "$project": {
+          "hosts": "$processes.hostname",
+          "ts": 1,
+          "compliance": 1
+        }
+      }
+    ]
+
+    event_output = list(config_collection.aggregate(deployment_pipeline))
+    events = []
+    for event in event_output:
+      temp_config = {}
+      temp_config['out_of_spec'] = []
+      temp_config['out_of_spec'] = dumps(event['compliance'], indent=2)
+      temp_config['hosts'] = dumps(event['hosts'], indent=2)
+      temp_config['ts'] = event['ts']
+      temp_config['_id'] = event['_id']
+      events.append(temp_config)
+    return render_template('deployment_events.html', events=events, low_date=request.args['dtg_fixed_low_deployment'], high_date=request.args['dtg_fixed_high_deployment'], deployment=request.args['deployment'])
+  except OperationFailure as e:
+    print(e.details)
+
+
+
+@app.route("/deployment_event_details/<oid>", methods=['GET'])
+def get_deployment_event_details(oid):
+  try:
+    if ObjectId.is_valid(oid):
+      deployment_data = config_collection.find_one({"_id": ObjectId(oid)},{"compliance": 0})
+    else:
+      deployment_data = config_collection.find_one({"_id": ast.literal_eval(oid)},{"compliance": 0})
+    formatted = dumps(deployment_data, indent=2)
+    return render_template('deployment_event_details_data.html', data=formatted, dtg=deployment_data['ts'], oid=deployment_data['deployment'])
+  except OperationFailure as e:
+    print(e.details)
 
 if __name__ == "__main__":
-   app.run(host='0.0.0.0', port=8000, debug=False)
+   app.run(host='0.0.0.0', port=8000, debug=DEBUG)
