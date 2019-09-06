@@ -24,6 +24,7 @@ except ImportError as e:
 LOG_FILE = 'deployment_configs.log'
 STANDARD_PROJECT = {"kerberos" : {"serviceName" : "mongodb"},"auth" : {"autoAuthMechanisms" : ["MONGODB-CR"],"autoAuthMechanism" : "MONGODB-CR"},"ssl" : {"clientCertificateMode" : "OPTIONAL","CAFilePath" : "/data/pki/ca.cert","autoPEMKeyFilePath" : "/etc/mongodb-mms/aa.pem"}}
 STANDARD_PROCESS = { "authSchemaVersion" : 5, "kerberos" : { "keytab" : "/data/pki/server_keytab" }, "manualMode" : False, "disabled" : False, "logRotate" : { "timeThresholdHrs" : 24, "sizeThresholdMB" : 1000 }, "version" : "3.6.13-ent", "args2_6" : { "net" : { "ssl" : { "mode" : "requireSSL" }, "port" : 27017, "bindIpAll" : True }, "storage" : { "wiredTiger" : { "engineConfig" : { "directoryForIndexes" : True }}, "dbPath" : "/data/db", "directoryPerDB" : True }, "security" : { "encryptionKeyFile" : "/data/pki/mongodb_keyfile", "enableEncryption" : True }, "systemLog" : { "path" : "/data/logs/mongodb.log", "destination" : "file" } }, "featureCompatibilityVersion" : "3.6" }
+waiver_processes = {"processes": {"version": "WAIVER"}}
 
 # Get config setting from `event_watcher.config` file
 if os.path.isfile('deployment_configs.conf') == False:
@@ -47,6 +48,7 @@ try:
     AUDIT_DB_SSL_CA = config.get('audit_db', 'ssl_ca_cert_path')
   OPS_MANAGER_TIMEOUT = config.getint('ops_manager','timeout', fallback=1000)
   AUDIT_DB_TIMEOUT = config.getint('audit_db','timeout', fallback=1000)
+  EXCLUDED_ROOT_KEYS = config.get('general','excluded_root_keys',fallback=[]).split(',')
 except configparser.NoOptionError as e:
   logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
   logging.error('The config file must include the `BASEURL` option in the `audit_db` section')
@@ -91,6 +93,7 @@ if DEBUG == True:
   logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
   logging.debug("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', AUDIT_DB_CONNECTION_STRING))
   logging.debug("OPS MANAGER CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',BASEURL))
+  logging.debug("EXCLUDED KEYS: %s" % EXCLUDED_ROOT_KEYS)
   print("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', AUDIT_DB_CONNECTION_STRING))
   print("OPS MANAGER CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',BASEURL))
 else:
@@ -127,8 +130,8 @@ def get(endpoint):
     print(resp.text)
     raise requests.exceptions.RequestException
 
-def check_dict(root, s_dict, comp_dict):
-  failure_data = []
+def check_dict(root, s_dict, comp_dict, waivers={}):
+  failure_data = {"issue": [], "waiver": []}
   if type(s_dict) is dict:
     for ks, vs in s_dict.items():
       if root == '':
@@ -139,30 +142,42 @@ def check_dict(root, s_dict, comp_dict):
       if not vd:
         if DEBUG:
           print("\033[91mSadness: `%s: %s` is missing for the deployment\033[m" % (k,vs))
-        failure_data.append("`%s: %s` is missing for the deployment" % (k,vs))
+        failure_data['issue'].append("`%s: %s` is missing for the deployment" % (k,vs))
         continue
       if type(vs) is dict:
         if type(vd) is dict:
-          failure_data = failure_data + check_dict(k, vs, vd)
+          temp_dict = check_dict(k, vs, vd, waivers)
+          failure_data['waiver'].extend(temp_dict['waiver'])
+          failure_data['issue'].extend(temp_dict['issue'])
         else:
           if DEBUG:
             print("\033[91mSadness: `%s: %s`, should be `%s`\033[m" % (k , vd, vs))
-          failure_data.append("`%s: %s`, should be `%s`" % (k , vd, vs))
+          failure_data['issue'].append("`%s: %s`, should be `%s`" % (k , vd, vs))
       elif type(vs) is list:
         if type(vd) is list:
-          failure_data = failure_data + check_list(k , vs, vd)
+          temp_dict = check_list(k, vs, vd, waivers)
+          failure_data['waiver'].extend(temp_dict['waiver'])
+          failure_data['issue'].extend(temp_dict['issue'])
         else:
           if DEBUG:
             print("\033[91mSadness: `%s: %s, should be %s`\033[m" % (k , vd, vs))
-          failure_data.append("`%s: %s`, should be `%s`" % (k , vd, vs))
+          failure_data['issue'].append("`%s: %s`, should be `%s`" % (k , vd, vs))
       elif vs != vd:
-        if DEBUG:
-          print("\033[91mSadness: `%s: %s, should be %s`\033[m" % (k , vd, vs))
-        failure_data.append("`%s: %s`, should be `%s`" % (k , vd, vs))
+        try:
+          x = reduce(dict.get, k.split("."), waivers)
+          if x:
+            if DEBUG:
+              print("\033[93mWaiver: `%s: %s, should be %s`\033[m" % (k, vd, vs))
+            failure_data['waiver'].append("`%s: %s`, standard is `%s`" % (k , vd, vs))
+        except TypeError:
+          if DEBUG:
+            print("\033[91mSadness: `%s: %s, should be %s`\033[m" % (k , vd, vs))
+          failure_data['issue'].append("`%s: %s`, should be `%s`" % (k , vd, vs))
   return failure_data
 
-def check_list(k, s_array, d_array):
-  failure_data = []
+
+def check_list(k, s_array, d_array, waivers):
+  failure_data = {"issue": [], "waiver": []}
   if type(s_array) is list and type(d_array) is list:
     s_array.sort()
     d_array.sort()
@@ -171,26 +186,30 @@ def check_list(k, s_array, d_array):
       if not vd:
         if DEBUG:
           print("\033[91mSadness: `%s:%s` is missing for the deployment\033[m" % (k, vs))
-        failure_data.append("`%s: %s` is missing for the deployment" % (k,vs))
+        failure_data['issue'].append("`%s: %s` is missing for the deployment" % (k,vs))
         break
       if type(vs) is dict:
           if type(vd) is dict:
-            failure_data = failure_data + check_dict(k, vs, vd)
+            temp_dict = check_dict(k, vs, vd, waivers)
+            failure_data['waiver'].extend(temp_dict['waiver'])
+            failure_data['issue'].extend(temp_dict['issue'])
           else:
             if DEBUG:
               print("\033[91mSadness: `%s: %s, should be %s`\033[m" % (k , vd, vs))
-            failure_data.append("`%s: %s`, should be `%s`" % (k , vd, vs))
+            failure_data['issue'].append("`%s: %s`, should be `%s`" % (k , vd, vs))
       if type(vs) is list:
           if type(vd) is list:
-            failure_data = failure_data + check_list(k, vs, vd)
+            temp_dict = check_list(k, vs, vd, waivers)
+            failure_data['waiver'].extend(temp_dict['waiver'])
+            failure_data['issue'].extend(temp_dict['issue'])
           else:
             if DEBUG:
               print("\033[91mSadness: `%s: %s, should be %s`\033[m" % (k , vd, vs))
-            failure_data.append("`%s: %s`, should be `%s`" % (k , vd, vs))
+            failure_data['issue'].append("`%s: %s`, should be `%s`" % (k , vd, vs))
       elif vs != vd:
         if DEBUG:
           print("\033[91mSadness: `%s: %s, should be %s`\033[m" % (k, d_array, s_array))
-        failure_data.append("`%s: %s`, should be `%s`" % (k , vd, vs))
+        failure_data['issue'].append("`%s: %s`, should be `%s`" % (k , vd, vs))
         break
   return failure_data
 
@@ -198,19 +217,34 @@ def main():
   DEPLOYMENTS = get('/groups')
   for deployment in DEPLOYMENTS['results']:
     desired_state = get('/groups/' + deployment['id'] + '/automationConfig')
-    desired_state['compliance'] = check_dict('', STANDARD_PROJECT, desired_state)
+    desired_state['compliance'] = []
+    # Deep copy because Python does copy by reference
+    deployment_compliance = check_dict('', STANDARD_PROJECT, desired_state, waiver_processes)
+    deployment_compliance['host'] = 'Project Level'
+    desired_state['compliance'].append(copy.deepcopy(deployment_compliance))
     # Determine if project has any members
     if desired_state['processes']:
       for instance in desired_state['processes']:
-        compliance = check_dict("processes", STANDARD_PROCESS, instance)
+        compliance = check_dict("processes", STANDARD_PROCESS, instance, waiver_processes)
         if compliance:
-          desired_state['compliance'] = desired_state['compliance'] + compliance
-      desired_state['deployment'] = deployment['name'] + " - (ORG: " + deployment['orgId'] + ")" 
-      desired_state.pop('mongoDbVersions')
+          compliance['host'] = instance['hostname']
+          if DEBUG:
+            print("COMPLIANCE: %s" % compliance)
+          # Deep copy because Python does copy by reference
+          desired_state['compliance'].append(copy.deepcopy(compliance))
+      print("FULL COMPLIANCE: %s" % desired_state['compliance'])
+      desired_state['deployment'] = deployment['name'] + " - (ORG: " + deployment['orgId'] + ")"
+      for remove_key in EXCLUDED_ROOT_KEYS:
+        if remove_key in desired_state:
+          desired_state.pop(remove_key)
+          if DEBUG:
+            print("Removed Key: %s" % remove_key)
       if 'key' in desired_state['auth']:
         desired_state['auth']['key'] = '<REDACTED>'
       if 'autoPwd' in desired_state['auth']:
         desired_state['auth']['autoPwd'] = '<REDACTED>'
+      if 'ldap' in desired_state and 'bindQueryPassword' in desired_state['ldap']:
+        desired_state['ldap']['bindQueryPassword'] = '<REDACTED>'
       for user in desired_state['auth']['usersWanted']:
         if 'pwd' in user:
           user['pwd'] = '<REDACTED>'
@@ -221,8 +255,8 @@ def main():
 
       # write results to audit db
       desired_state['ts'] = datetime.datetime.now()
-      if DEBUG is True:
-        print(desired_state)
+      if DEBUG:
+        print("RECORDED DATA: %s" % desired_state)
       try:
         audit_collection.insert_one(desired_state)
       except OperationFailure as e:

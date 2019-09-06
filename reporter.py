@@ -329,7 +329,7 @@ def get_deployment():
     for event in event_output:
       temp_config = {}
       temp_config['out_of_spec'] = []
-      temp_config['out_of_spec'] = dumps(event['compliance'], indent=2)
+      temp_config['out_of_spec'] = event['compliance']
       temp_config['hosts'] = dumps(event['hosts'], indent=2)
       temp_config['ts'] = event['ts']
       temp_config['_id'] = event['_id']

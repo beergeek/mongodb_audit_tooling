@@ -9,12 +9,32 @@
       <p>Between {{low_date}} and {{high_date}}</p>
       <table>
         <th>Timestamp</th>
-        <th>Compliance Status</th>
+        <th>Items Out of Compliance</th>
+        <th>Items with Waivers</th>
         <th>Hosts</th>
       {% for event in events %}
       <tr>
         <td><a href="./deployment_event_details/{{event['_id']}}" target="_blank"><script>document.write(new Date("{{event['ts']}}"));</script></a></td>
-        <td><pre id="evil">{{event['out_of_spec']}}</pre></td>
+        <td id="evil">
+          {% for i in event['out_of_spec'] %}
+          <h3>{{i['host']}}</h3>
+            {% for j in i['issue'] %}
+              <ul>
+                <li>{{j}}</li>
+              </ul>
+            {% endfor %}
+          {% endfor %}
+        </td>
+        <td>
+          {% for i in event['out_of_spec'] %}
+          <h3>{{i['host']}}</h3>
+            {% for j in i['waiver'] %}
+              <ul>
+                <li>{{j}}</li>
+              </ul>
+            {% endfor %}
+          {% endfor %}
+        </td>
         <td><pre>{{event['hosts']}}</pre></td>
       </tr>
       {% endfor %}
