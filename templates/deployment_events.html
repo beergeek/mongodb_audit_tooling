@@ -16,24 +16,36 @@
       <tr>
         <td><a href="./deployment_event_details/{{event['_id']}}" target="_blank"><script>document.write(new Date("{{event['ts']}}"));</script></a></td>
         <td id="evil">
+            <table>
           {% for i in event['out_of_spec'] %}
-          <h3>{{i['host']}}</h3>
+            <th>{{i['host']}}</th>
+            <tr>
+            <td>
             {% for j in i['issue'] %}
               <ul>
                 <li>{{j}}</li>
               </ul>
             {% endfor %}
+              </td>
+            </tr>
           {% endfor %}
+        </table>
         </td>
         <td>
+            <table>
           {% for i in event['out_of_spec'] %}
-          <h3>{{i['host']}}</h3>
+          <th>{{i['host']}}</th>
+          <tr>
+          <td>
             {% for j in i['waiver'] %}
               <ul>
                 <li>{{j}}</li>
               </ul>
             {% endfor %}
+          </td>
+        </tr>
           {% endfor %}
+        </table>
         </td>
         <td><pre>{{event['hosts']}}</pre></td>
       </tr>

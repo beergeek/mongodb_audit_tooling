@@ -2,12 +2,13 @@ try:
   import time, pymongo, configparser, os, sys, json, socket, logging, datetime, kerberos, re
   from pymongo.errors import DuplicateKeyError, OperationFailure
   from bson.json_util import loads
-  from pprint import pprint
+  import sys
 except ImportError as e:
   print(e)
   exit(1)
 
-LOG_FILE = 'log_processor.log'
+LOG_FILE = sys.path[0] + '/log_processor.log'
+CONF_FILE = sys.path[0] + '/log_processor.conf'
 ZERO = datetime.timedelta(0)
 HOUR = datetime.timedelta(hours=1)
 
@@ -24,13 +25,13 @@ class UTC(datetime.tzinfo):
     return ZERO
 
 # Get config setting from `log_processor.config` file
-if os.path.isfile('log_processor.conf') == False:
+if os.path.isfile(CONF_FILE) == False:
   logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
   logging.error('The `log_processor.conf` file must exist in the same directory as the Python script')
   print('\033[93m' + 'The `log_processor.conf` file must exist in the same directory as the Python script, exiting' + '\033[m')
   sys.exit(0)
 config = configparser.ConfigParser()
-config.read('log_processor.conf')
+config.read(CONF_FILE)
 try:
   debug = config.getboolean('general','debug', fallback=False)
   audit_db_connection_string = config.get('audit_db','connection_string')

@@ -21,19 +21,18 @@ except ImportError as e:
   print(e)
   exit(1)
 
-LOG_FILE = 'deployment_configs.log'
-STANDARD_PROJECT = {"kerberos" : {"serviceName" : "mongodb"},"auth" : {"autoAuthMechanisms" : ["MONGODB-CR"],"autoAuthMechanism" : "MONGODB-CR"},"ssl" : {"clientCertificateMode" : "OPTIONAL","CAFilePath" : "/data/pki/ca.cert","autoPEMKeyFilePath" : "/etc/mongodb-mms/aa.pem"}}
-STANDARD_PROCESS = { "authSchemaVersion" : 5, "kerberos" : { "keytab" : "/data/pki/server_keytab" }, "manualMode" : False, "disabled" : False, "logRotate" : { "timeThresholdHrs" : 24, "sizeThresholdMB" : 1000 }, "version" : "3.6.13-ent", "args2_6" : { "net" : { "ssl" : { "mode" : "requireSSL" }, "port" : 27017, "bindIpAll" : True }, "storage" : { "wiredTiger" : { "engineConfig" : { "directoryForIndexes" : True }}, "dbPath" : "/data/db", "directoryPerDB" : True }, "security" : { "encryptionKeyFile" : "/data/pki/mongodb_keyfile", "enableEncryption" : True }, "systemLog" : { "path" : "/data/logs/mongodb.log", "destination" : "file" } }, "featureCompatibilityVersion" : "3.6" }
+LOG_FILE = sys.path[0] + '/deployment_configs.log'
+CONF_FILE = sys.path[0] + '/deployment_configs.conf'
 waiver_processes = {"processes": {"version": "WAIVER"}}
 
 # Get config setting from `event_watcher.config` file
-if os.path.isfile('deployment_configs.conf') == False:
+if os.path.isfile(CONF_FILE) == False:
   logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
   logging.error('The `deployment_configs.conf` file must exist in the same directory as the Python script')
   print('\033[93m' + 'The `deployment_configs.conf` file must exist in the same directory as the Python script, exiting' + '\033[m')
   sys.exit(0)
 config = configparser.ConfigParser()
-config.read('deployment_configs.conf')
+config.read(CONF_FILE)
 try:
   DEBUG = config.getboolean('general','debug', fallback=False)
   BASEURL = config.get('ops_manager','baseurl')
@@ -130,6 +129,24 @@ def get(endpoint):
     print(resp.text)
     raise requests.exceptions.RequestException
 
+def get_standards():
+  try:
+    standard = audit_db.standards.find_one({"valid_to": {"$exists": False}})
+  except OperationFailure as e:
+    print(e.details)
+    logging.error(e.details)
+  return standard
+
+def get_waiver(deployment):
+  try:
+    waiver = audit_db.standards.find_one({"deployment": deployment, "valid_to": {"$lt": datetime.datetime.now()}})
+    if not waiver:
+      waiver = {'processes': {},'project': {}}
+  except OperationFailure as e:
+    print(e.details)
+    logging.error(e.details)
+  return waiver
+
 def check_dict(root, s_dict, comp_dict, waivers={}):
   failure_data = {"issue": [], "waiver": []}
   if type(s_dict) is dict:
@@ -214,25 +231,36 @@ def check_list(k, s_array, d_array, waivers):
   return failure_data
 
 def main():
+  STANDARDS = get_standards()
+  if DEBUG:
+    print(STANDARDS)
   DEPLOYMENTS = get('/groups')
   for deployment in DEPLOYMENTS['results']:
     desired_state = get('/groups/' + deployment['id'] + '/automationConfig')
+    # determine if a waiver exists for this deployment
+    waiver_details = get_waiver(deployment['id'])
+    if DEBUG:
+      print(waiver_details)
     desired_state['compliance'] = []
-    # Deep copy because Python does copy by reference
-    deployment_compliance = check_dict('', STANDARD_PROJECT, desired_state, waiver_processes)
-    deployment_compliance['host'] = 'Project Level'
-    desired_state['compliance'].append(copy.deepcopy(deployment_compliance))
+    # Only check for compliance if there is a standard to check against
+    if STANDARDS:
+      deployment_compliance = check_dict('', STANDARDS['project'], desired_state, waiver_details['project'])
+      deployment_compliance['host'] = 'Project Level'
+      # Deep copy because Python does copy by reference
+      desired_state['compliance'].append(copy.deepcopy(deployment_compliance))
     # Determine if project has any members
     if desired_state['processes']:
       for instance in desired_state['processes']:
-        compliance = check_dict("processes", STANDARD_PROCESS, instance, waiver_processes)
-        if compliance:
-          compliance['host'] = instance['hostname']
-          if DEBUG:
-            print("COMPLIANCE: %s" % compliance)
-          # Deep copy because Python does copy by reference
-          desired_state['compliance'].append(copy.deepcopy(compliance))
-      print("FULL COMPLIANCE: %s" % desired_state['compliance'])
+        # Only check for compliance if there is a standard to check against
+        if STANDARDS:
+          compliance = check_dict("processes", STANDARDS['processes'], instance, waiver_details['processes'])
+          # If we have a compliance issue or waiver in place we record that too
+          if compliance:
+            compliance['host'] = instance['hostname']
+            if DEBUG:
+              print("COMPLIANCE: %s" % compliance)
+            # Deep copy because Python does copy by reference
+            desired_state['compliance'].append(copy.deepcopy(compliance))
       desired_state['deployment'] = deployment['name'] + " - (ORG: " + deployment['orgId'] + ")"
       for remove_key in EXCLUDED_ROOT_KEYS:
         if remove_key in desired_state:

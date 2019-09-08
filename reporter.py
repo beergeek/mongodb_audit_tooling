@@ -1,6 +1,5 @@
 try:
   from flask import Flask, render_template, request, current_app, redirect, url_for
-  from collections import defaultdict
   import configparser
   import json
   import time
@@ -98,6 +97,8 @@ except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFai
 audit_db = audit_client['logging']
 audit_collection = audit_db['logs']
 config_collection = audit_db['configs']
+standards_collection = audit_db['standards']
+waivers_collection = audit_db['waivers']
 
 # main route 
 @app.route("/")
@@ -321,6 +322,11 @@ def get_deployment():
           "ts": 1,
           "compliance": 1
         }
+      },
+      {
+        "$sort": {
+          "ts": -1
+        }
       }
     ]
 
@@ -351,6 +357,16 @@ def get_deployment_event_details(oid):
     return render_template('deployment_event_details_data.html', data=formatted, dtg=deployment_data['ts'], oid=deployment_data['deployment'])
   except OperationFailure as e:
     print(e.details)
+
+@app.route("/admin", methods=['GET'])
+def admin_tasks():
+  try:
+    standards = dumps(standards_collection.find_one({"valid_to": {"$exists": False}}), indent=2)
+    deployments = list(waivers_collection.distinct("deployment"))
+    return render_template('admin_tasks.html', standards=standards, deployments=deployments)
+  except OperationFailure as e:
+    print(e.details)
+
 
 if __name__ == "__main__":
    app.run(host='0.0.0.0', port=8000, debug=DEBUG)

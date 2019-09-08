@@ -5,16 +5,17 @@ except ImportError as e:
   print(e)
   exit(1)
 
-LOG_FILE = 'config_watcher.log'
+LOG_FILE = sys.path[0] + '/config_watcher.log'
+CONF_FILE = sys.path[0] + '/config_watcher.conf'
 
 # Get config setting from `config_watcher.config` file
-if os.path.isfile('config_watcher.conf') == False:
+if os.path.isfile(CONF_FILE) == False:
   logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
   logging.error('The `config_watcher.conf` file must exist in the same directory as the Python script')
   print('\033[93m' + 'The `config_watcher.conf` file must exist in the same directory as the Python script, exiting' + '\033[m')
   sys.exit(0)
 config = configparser.ConfigParser()
-config.read('config_watcher.conf')
+config.read(CONF_FILE)
 try:
   DEBUG = config.getboolean('general','debug', fallback=False)
   OPS_MANAGER_CONNECTION_STRING = config.get('ops_manager_db','connection_string')
