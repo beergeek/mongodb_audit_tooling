@@ -13,7 +13,7 @@ try:
   import sys
   import datetime
   import re
-  from pymongo.errors import OperationFailure
+  from pymongo.errors import OperationFailure,PyMongoError
   if sys.version_info[0] >= 3:
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     urllib3.disable_warnings(urllib3.exceptions.SubjectAltNameWarning)
@@ -118,6 +118,7 @@ except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFai
   sys.exit(1)
 audit_db = audit_client['logging']
 audit_collection = audit_db['configs']
+archive_collection = audit_db['configs_archive']
 
 def get(endpoint):
   resp = requests.get(BASEURL + '/api/public/v1.0' + endpoint, auth=HTTPDigestAuth(USERNAME, TOKEN), verify=OPS_MANAGER_SSL_CA, cert=OPS_MANAGER_SSL_PEM, timeout=OPS_MANAGER_TIMEOUT)
@@ -283,10 +284,76 @@ def main():
 
       # write results to audit db
       desired_state['ts'] = datetime.datetime.now()
-      if DEBUG:
-        print("RECORDED DATA: %s" % desired_state)
       try:
-        audit_collection.insert_one(desired_state)
+        for i in range(0,4):
+          if compliance:
+            # Get the current timestamp of the document so we can check if it is written before we modify
+            current_state = audit_collection.find_one(
+              {
+                "deployment": desired_state['deployment']
+              },
+              {
+                "start_datetime": 1, "ts": 1
+              }
+            )
+            # set our schema version
+            if 'schema_version' not in desired_sta
+
+            # If we have a compliance issueincrement the occurence counter.
+            # Determine if the deployment already has a compliance issue occurring.
+            # If not set the start date for the issue
+            # If there is no compliance issue, reset the date and counter.
+            if 'start_datetime' in current_state:
+              if DEBUG:
+                print("RECORDED DATA: %s" % desired_state)
+              result = audit_collection.update_one(
+                {
+                  "deployment": desired_state['deployment'],
+                  "ts": current_state['ts']
+                },
+                {
+                  "$set": desired_state,
+                  "$inc": {"uncompliance_count": 1}
+                }
+              )
+            else:
+              desired_state['start_datetime'] = desired_state['ts']
+              if DEBUG:
+                print("RECORDED DATA: %s" % desired_state)
+              result = audit_collection.update_one(
+                {
+                  "deployment": desired_state['deployment'],
+                  "ts": current_state['ts']
+                },
+                {
+                  "$set": desired_state,
+                  "$inc": {"uncompliance_count": 1}
+                },
+                upsert=True
+              )
+          else:
+            desired_state['uncompliance_count'] = 0
+            if DEBUG:
+              print("RECORDED DATA: %s" % desired_state)
+            result = audit_collection.update_one(
+              {
+                "deployment": desired_state['deployment'],
+                "ts": current_state['ts']
+              },
+              {
+                "$set": desired_state,
+                "$unset": {"start_datetime": ""}
+              },
+              upsert=True
+            )
+          if result.matched_count == 1 or result.upserted_id:
+            # update was successful, so write to archive as well, then exit the loop
+            # retry if it was not successful
+            archive_collection.insert_one(desired_state)
+            break
+          elif i == 4:
+            print("Failed to update the correct document, exiting")
+            raise PyMongoError("Failed to update the correct document, exiting")
       except OperationFailure as e:
         print(e.details)
         logging.error(e.details)

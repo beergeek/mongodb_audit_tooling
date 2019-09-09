@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+  <head>
+    <title>Reports</title>
+    <link rel="stylesheet" href='../static/style.css'/>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../static/pikaday.css">
+    <script type="text/javascript">
+      function stoppedTyping(){
+          if(document.getElementById('waiver_details').value.length > 0) { 
+              document.getElementById('submitter').disabled = false; 
+          } else { 
+              document.getElementById('submitter').disabled = true;
+          }
+      }
+  </script>
+  </head>
+  <body>
+    <h1>Waiver Details</h1>
+      <h2>{{deployment}}</h2>
+      <form action="update_waiver/{{deployment}}">
+      <table>
+        <tr>
+          <td>Authentication:</td>
+          <td>
+            <ul>
+              <li>GSSAPI <input type="checkbox" name="GSSAPI" {{gssapi_checked}}></li>
+              <li>SCRAM-SHA-1 <input type="checkbox" name="SCRAM-SHA-1" {{scram_sha_1_checked}}></li>
+              <li>SCRAM-SHA-256 <input type="checkbox" name="SCRAM-SHA-256" {{scram_sha_256_checked}}></li>
+              <li>LDAP <input type="checkbox" name="LDAP" {{ldap_checked}}></li>
+            </ul>
+          </td>
+        </tr>
+        <tr>
+          <td>Waiver Approval Number:</td>
+          <td><input type="text" maxwidth=20 id="waiver_details" name="waiver_details" onkeyup="stoppedTyping()"></td>
+        </tr>
+        <tr>
+          <td>Waiver Start Date:</td>
+          <td><input type="text" id="start" name="start">{{start}}</td>
+        </tr>
+        <tr>
+          <td>Waiver End Date:</td>
+          <td><input type="text" id="end" name="end">{{end}}</td>
+        </tr>
+        <tr>
+          <td rowspan="2"><input type="submit" id="submitter" disabled/></td>
+        </tr>
+      </table>
+    </form>
+      <br>
+      <script src="static/pikaday.js"></script>
+      <script>
+      var startDate,
+          endDate,
+          updateStartDate = function() {
+              startPicker.setStartRange(startDate);
+              endPicker.setStartRange(startDate);
+              endPicker.setMinDate(startDate);
+          },
+          updateEndDate = function() {
+              startPicker.setEndRange(endDate);
+              startPicker.setMaxDate(endDate);
+              endPicker.setEndRange(endDate);
+          },
+          startPicker = new Pikaday({
+              field: document.getElementById('start'),
+              minDate: new Date(),
+              maxDate: new Date(2020, 12, 31),
+              onSelect: function() {
+                  startDate = this.getDate();
+                  updateStartDate();
+              }
+          }),
+          endPicker = new Pikaday({
+              field: document.getElementById('end'),
+              minDate: new Date(),
+              maxDate: new Date(2020, 12, 31),
+              onSelect: function() {
+                  endDate = this.getDate();
+                  updateEndDate();
+              }
+          }),
+          _startDate = startPicker.getDate(),
+          _endDate = endPicker.getDate();
+          if (_startDate) {
+              startDate = _startDate;
+              updateStartDate();
+          }
+          if (_endDate) {
+              endDate = _endDate;
+              updateEndDate();
+          }
+      </script>
+  </body>
+</html>
