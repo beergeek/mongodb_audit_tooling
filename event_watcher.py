@@ -141,6 +141,7 @@ try:
     document['host'] = 'OPS MANAGER'
     document['source'] = 'DEPLOYMENT EVENT'
     document['ts'] = document['fullDocument']['cre']
+    document['schema_version'] = 0
     if DEBUG:
       logging.debug("RESUME_TOKEN: %s" % resume_token)
       print("RESUME_TOKEN: %s" % resume_token)

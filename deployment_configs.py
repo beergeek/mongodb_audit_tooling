@@ -297,7 +297,8 @@ def main():
               }
             )
             # set our schema version
-            if 'schema_version' not in desired_sta
+            if 'schema_version' not in desired_state:
+              desired_state['schema_version'] = 0
 
             # If we have a compliance issueincrement the occurence counter.
             # Determine if the deployment already has a compliance issue occurring.

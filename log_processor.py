@@ -195,6 +195,8 @@ try:
           clean_line['host'] = socket.gethostname()
           clean_line['source'] = 'DATABASE AUDIT'
           resume_token = clean_line['ts']
+          # set schema version
+          clean_line['schema_version'] = 0
           try:
             # insert data
             if debug:

@@ -98,8 +98,11 @@ except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFai
 audit_db = audit_client['logging']
 audit_collection = audit_db['logs']
 config_collection = audit_db['configs']
+config_archive_collection = audit_db['configs_archive']
 standards_collection = audit_db['standards']
+standards_archive_collection = audit_db['standards_archive']
 waivers_collection = audit_db['waivers']
+waivers_archive_collection = audit_db['waivers_archive']
 
 # main route 
 @app.route("/")
@@ -311,29 +314,59 @@ def get_host_event_details(oid):
 @app.route("/deployment_report", methods=["GET"])
 def get_deployment():
   try:
-    deployment_pipeline = [
-      {
-        "$match": {
-          "deployment": request.args["deployment"]
+    if 'latest_iscc' in request.args:
+      deployment_pipeline = [
+        {
+          "$match": {
+            "deployment": request.args["deployment"]
+          }
+        },
+        {
+          "$project": {
+            "hosts": "$processes.hostname",
+            "ts": 1,
+            "compliance": 1,
+            "uncompliance_count": 1,
+            "start_datetime": 1
+          }
+        },
+        {
+          "$sort": {
+            "ts": -1
+          }
         }
-      },
-      {
-        "$project": {
-          "hosts": "$processes.hostname",
-          "ts": 1,
-          "compliance": 1,
-          "uncompliance_count": 1,
-          "start_datetime": 1
-        }
-      },
-      {
-        "$sort": {
-          "ts": -1
-        }
-      }
-    ]
+      ]
+      event_output = list(config_collection.aggregate(deployment_pipeline))
+      title = 'Latest report'
+    else:
+      deployment_pipeline = [
+        {
+          "$match": {
+            "deployment": request.args["deployment"],
+            "$and": [
+              {"ts": {"$gt":  datetime.datetime.strptime(request.args['dtg_fixed_low_deployment'], "%a, %d %b %Y %H:%M:%S %Z")}},
+              {"ts": {"$lte": datetime.datetime.strptime(request.args['dtg_fixed_high_deployment'], "%a, %d %b %Y %H:%M:%S %Z")}}
+            ],
+          }
+        },
+        {
+          "$project": {
+            "hosts": "$processes.hostname",
+            "ts": 1,
+            "compliance": 1,
+            "uncompliance_count": 1,
+            "start_datetime": 1
+          }
+        },
+        {
+          "$sort": {
+            "ts": -1
+          }
+        }        
+      ]
+      event_output = list(config_archive_collection.aggregate(deployment_pipeline))
+      title = "Between request.args['dtg_fixed_low_deployment'] and request.args['dtg_fixed_high_deployment']"
 
-    event_output = list(config_collection.aggregate(deployment_pipeline))
     events = []
     for event in event_output:
       temp_config = {}
@@ -355,10 +388,9 @@ def get_deployment():
         print(event)
     if DEBUG:
       print(events)
-    return render_template('deployment_events.html', events=events, low_date=request.args['dtg_fixed_low_deployment'], high_date=request.args['dtg_fixed_high_deployment'], deployment=request.args['deployment'])
+    return render_template('deployment_events.html', title=title, events=events, deployment=request.args['deployment'])
   except OperationFailure as e:
     print(e.details)
-
 
 
 @app.route("/deployment_event_details/<oid>", methods=['GET'])
@@ -388,10 +420,10 @@ def update_standard(oid):
     standard_data = loads(request.args['standard'])
     standard_data.pop('_id')
     standard_data['valid_from'] = datetime.datetime.now()
-    response_insert = standards_collection.insert(standard_data)
-    response_update = standards_collection.update_one({"_id": ObjectId(oid)},{"$set": {"valid_to": datetime.datetime.now()}})
+    response_update = standards_collection.update_one({"_id": ObjectId(oid)}, {"$set": standard_data}, upsert=True)
+    standards_archive_collection.insert_one({"_id": ObjectId(oid)},{"$set": {"valid_to": datetime.datetime.now()}})
     if response_update.modified_count == 1:
-      new_standard = standards_collection.find_one({"_id": ObjectId(response_insert)})
+      new_standard = standards_collection.find_one({"_id": ObjectId(oid)})
       outcome = 'Success!'
     else:
       new_standard = list(standards_collection.find({"valid_to": {"$exists": False}}))
@@ -403,17 +435,53 @@ def update_standard(oid):
 @app.route("/deployment_waivers", methods=['GET'])
 def deployment_waiver():
   try:
-    waiver_details = waivers_collection.find_one({"deployment": request.args['deployment'], "valid_from": {"$lt": datetime.datetime.now()}, "valid_to": {"$gt": datetime.datetime.now()}})
-    return render_template("waiver_details.html", waiver_details=waiver_details, deployment=request.args['deployment'])
+    waiver_details = waivers_collection.find_one({"deployment": request.args['deployment'], "valid_from": {"$lte": datetime.datetime.now()}, "valid_to": {"$gt": datetime.datetime.now()}})
+    details = {}
+    try:
+      if 'GSSAPI' in waiver_details['project']['auth']['autoAuthMechanisms']:
+        details['gssapi_checked'] = 'checked'
+    except (KeyError, TypeError):
+      pass
+    try:
+      if 'MONGODB-CR' in waiver_details['project']['auth']['autoAuthMechanisms']:
+        details['scram_sha_1_checked'] = 'checked'
+    except (KeyError, TypeError):
+      pass
+    try:
+      if 'SCRAM-SHA-256' in waiver_details['project']['auth']['autoAuthMechanisms']:
+        details['scram_sha_256_checked'] = 'checked'
+    except (KeyError, TypeError):
+      pass
+    try:
+      if 'PLAIN' in waiver_details['project']['auth']['autoAuthMechanisms']:
+        details['ldap_checked'] = 'checked'
+    except (KeyError, TypeError):
+      pass
+    try:
+      details['start'] = datetime.datetime.strftime(waiver_details['valid_from'], "%a, %d %b %Y %H:%M:%S %Z") + " GMT"
+    except (KeyError, TypeError):
+      details['start'] = datetime.datetime.now()
+    try:
+      details['end'] = datetime.datetime.strftime(waiver_details['valid_to'], "%a, %d %b %Y %H:%M:%S %Z") + " GMT"
+    except (KeyError, TypeError):
+      details['end'] = datetime.datetime.now() + datetime.timedelta(days=30)
+    try:
+      details['comments'] = waiver_details['comments']
+    except (KeyError, TypeError):
+      pass
+    try:
+        details['last_changed'] = waiver_details['changed_datetime']
+    except (KeyError, TypeError):
+      pass
+    return render_template("waiver_details.html", details=details, deployment=request.args['deployment'])
   except OperationFailure as e:
     print(e.details)
 
 @app.route("/update_waiver/<deployment>")
 def update_waiver(deployment):
   try:
-    end_date = datetime.datetime.strptime(request.args['end'], "%a %b %d %Y")
-    start_date = datetime.datetime.strptime(request.args['start'], "%a %b %d %Y")
-    print(end_date)
+    end_date = datetime.datetime.strptime(request.args['end'], "%a, %d %b %Y %H:%M:%S %Z")
+    start_date = datetime.datetime.strptime(request.args['start'], "%a, %d %b %Y %H:%M:%S %Z")
     auth = []
     if 'GSSAPI' in request.args:
       auth.append('GSSAPI')
@@ -423,11 +491,11 @@ def update_waiver(deployment):
       auth.append('SCRAM-SHA-256')
     if 'LDAP' in request.args:
       auth.append('PLAIN')
-    update_details = {"deployment": deployment,"valid_to": end_date, "valid_from": start_date, "project.auth.autoAuthMechanisms": auth, "changed_dtg": datetime.datetime.now()}
-    print(update_details)
+    update_details = {"deployment": deployment,"valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"autoAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(),"comments": request.args['comments']}
     details = waivers_collection.update_one({"deployment": deployment},{"$set": update_details}, upsert=True)
-    print(details)
-    return "data"
+    waivers_archive_collection.insert_one({"deployment": deployment,"valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"autoAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now()})
+    details = waivers_collection.find_one({"deployment": deployment})
+    return render_template('new_waiver.html', new_waiver=dumps(details, indent=2))
   except OperationFailure as e:
     print(e.details)
 

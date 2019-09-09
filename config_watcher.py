@@ -140,6 +140,7 @@ try:
     document['tag'] = 'OPS EVENT'
     document['host'] = 'OPS MANAGER'
     document['source'] = 'OPS MANAGER CONFIG'
+    document['schema_version'] = 0
     if DEBUG:
       logging.debug("RESUME_TOKEN: %s" % resume_token)
       print("RESUME_TOKEN: %s" % resume_token)
