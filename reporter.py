@@ -110,44 +110,73 @@ def index():
   try:
     user_list_pipeline = [
       {
+        "$facet": {
+          "un": [
+            {
+              "$match": {
+                "fullDocument.un": {
+                  "$ne": None
+                }
+              }
+            },
+            {
+              "$group": {
+                "_id": "$fullDocument.un"
+              }
+            }
+          ],
+          "users": [
+            {
+              "$match": {
+                "users.user": {
+                  "$ne": None
+                }
+              }
+            },
+            {
+              "$group": {
+                "_id": {
+                  "$arrayElemAt": [
+                    "$users.user",
+                    0
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
         "$project": {
-          "User": { 
-            "$ifNull": ['$users.user', '$fullDocument.un']
+          "users": {
+            "$concatArrays": [
+              "$users._id",
+              "$un._id"
+            ]
           }
         }
       },
       {
         "$group": {
-          "_id": "$User"
+          "_id": "$users"
         }
       },
       {
-        "$project": {
-          "Users": {
-            "$cond": {
-              "if": {
-                "$eq": [
-                  {
-                    "$type": "$_id"
-                  },
-                  "array"
-                ]
-              },
-              "then": {
-                "$arrayElemAt": ["$_id",0]
-              },
-              "else": "$_id"
-            }
-          },
-          "_id": 0
+        "$unwind": {
+          "path": "$_id"
+        }
+      },
+      {
+        "$match": {
+          "_id": {"$ne": None}
         }
       }
     ]
+    
     output0 = list(audit_collection.aggregate(user_list_pipeline))
     users = []
     for user in output0:
-      if 'Users' in user:
-        users.append(user['Users'])
+      users.append(user['_id'])
     output1 = list(audit_collection.distinct("fullDocument.clusterConfig.cluster.processes.hostname"))
     hosts = []
     for host in output1:

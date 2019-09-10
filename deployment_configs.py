@@ -302,7 +302,7 @@ def main():
       desired_state['ts'] = datetime.datetime.now()
       try:
         for i in range(0,4):
-          if compliance:
+          if 'issue' in compliance and len(compliance['issue']) > 0:
             # Get the current timestamp of the document so we can check if it is written before we modify
             current_state = audit_collection.find_one(
               {
@@ -349,6 +349,7 @@ def main():
                 upsert=True
               )
           else:
+            # No compliance issues
             desired_state['uncompliance_count'] = 0
             if DEBUG:
               print("RECORDED DATA: %s" % desired_state)
