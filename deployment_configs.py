@@ -202,6 +202,8 @@ def check_dict(root, s_dict, comp_dict, waivers={}):
 def check_list(k, s_array, d_array, waivers):
   failure_data = {"issue": [], "waiver": []}
   if type(s_array) is list and type(d_array) is list:
+    if len(s_array) != len(d_array):
+       failure_data['issue'].append("[`%s`] has too many elements" % ', '.join(map(str, d_array)))
     s_array.sort()
     d_array.sort()
     for index, vs in enumerate(s_array):
