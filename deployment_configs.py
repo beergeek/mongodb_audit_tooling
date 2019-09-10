@@ -140,9 +140,10 @@ def get_standards():
 
 def get_waiver(deployment):
   try:
-    waiver = audit_db.standards.find_one({"deployment": deployment, "valid_to": {"$lt": datetime.datetime.now()}})
+    x = {"deployment": deployment, "valid_to": {"$gt": datetime.datetime.now()}}
+    waiver = audit_db.waivers.find_one({"deployment": deployment, "valid_to": {"$gt": datetime.datetime.now()}})
     if not waiver:
-      waiver = {'processes': {},'project': {}}
+      return {}
   except OperationFailure as e:
     print(e.details)
     logging.error(e.details)
@@ -164,6 +165,8 @@ def check_dict(root, s_dict, comp_dict, waivers={}):
         continue
       if type(vs) is dict:
         if type(vd) is dict:
+          if DEBUG:
+            print('Another dict')
           temp_dict = check_dict(k, vs, vd, waivers)
           failure_data['waiver'].extend(temp_dict['waiver'])
           failure_data['issue'].extend(temp_dict['issue'])
@@ -173,6 +176,8 @@ def check_dict(root, s_dict, comp_dict, waivers={}):
           failure_data['issue'].append("`%s: %s`, should be `%s`" % (k , vd, vs))
       elif type(vs) is list:
         if type(vd) is list:
+          if DEBUG:
+            print('Another list')
           temp_dict = check_list(k, vs, vd, waivers)
           failure_data['waiver'].extend(temp_dict['waiver'])
           failure_data['issue'].extend(temp_dict['issue'])
@@ -182,12 +187,12 @@ def check_dict(root, s_dict, comp_dict, waivers={}):
           failure_data['issue'].append("`%s: %s`, should be `%s`" % (k , vd, vs))
       elif vs != vd:
         try:
-          x = reduce(dict.get, k.split("."), waivers)
-          if x:
+          #x = reduce(dict.get, k.split("."), waivers)
+          if waivers[ks] == vd:
             if DEBUG:
               print("\033[93mWaiver: `%s: %s, should be %s`\033[m" % (k, vd, vs))
             failure_data['waiver'].append("`%s: %s`, standard is `%s`" % (k , vd, vs))
-        except TypeError:
+        except KeyError:
           if DEBUG:
             print("\033[91mSadness: `%s: %s, should be %s`\033[m" % (k , vd, vs))
           failure_data['issue'].append("`%s: %s`, should be `%s`" % (k , vd, vs))
@@ -208,6 +213,8 @@ def check_list(k, s_array, d_array, waivers):
         break
       if type(vs) is dict:
           if type(vd) is dict:
+            if DEBUG:
+              print('Another dict')
             temp_dict = check_dict(k, vs, vd, waivers)
             failure_data['waiver'].extend(temp_dict['waiver'])
             failure_data['issue'].extend(temp_dict['issue'])
@@ -217,6 +224,8 @@ def check_list(k, s_array, d_array, waivers):
             failure_data['issue'].append("`%s: %s`, should be `%s`" % (k , vd, vs))
       if type(vs) is list:
           if type(vd) is list:
+            if DEBUG:
+              print('Another list')
             temp_dict = check_list(k, vs, vd, waivers)
             failure_data['waiver'].extend(temp_dict['waiver'])
             failure_data['issue'].extend(temp_dict['issue'])
@@ -239,12 +248,15 @@ def main():
   for deployment in DEPLOYMENTS['results']:
     desired_state = get('/groups/' + deployment['id'] + '/automationConfig')
     # determine if a waiver exists for this deployment
-    waiver_details = get_waiver(deployment['id'])
+    waiver_details = get_waiver(deployment['name'] + " - (ORG: " + deployment['orgId'] + ")")
     if DEBUG:
-      print(waiver_details)
+      print("DEPLOYMENT NAME: %s" % deployment['name'])
+      print("WAIVER: %s" % waiver_details)
     desired_state['compliance'] = []
     # Only check for compliance if there is a standard to check against
     if STANDARDS:
+      if 'project' not in waiver_details:
+        waiver_details['project'] = {}
       deployment_compliance = check_dict('', STANDARDS['project'], desired_state, waiver_details['project'])
       deployment_compliance['host'] = 'Project Level'
       # Deep copy because Python does copy by reference
@@ -254,6 +266,8 @@ def main():
       for instance in desired_state['processes']:
         # Only check for compliance if there is a standard to check against
         if STANDARDS:
+          if 'processes' not in waiver_details:
+            waiver_details['processes'] = {}
           compliance = check_dict("processes", STANDARDS['processes'], instance, waiver_details['processes'])
           # If we have a compliance issue or waiver in place we record that too
           if compliance:

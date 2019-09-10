@@ -421,7 +421,8 @@ def update_standard(oid):
     standard_data.pop('_id')
     standard_data['valid_from'] = datetime.datetime.now()
     response_update = standards_collection.update_one({"_id": ObjectId(oid)}, {"$set": standard_data}, upsert=True)
-    standards_archive_collection.insert_one({"_id": ObjectId(oid)},{"$set": {"valid_to": datetime.datetime.now()}})
+    standard_data['valid_to'] = datetime.datetime.now()
+    standards_archive_collection.insert_one(standard_data)
     if response_update.modified_count == 1:
       new_standard = standards_collection.find_one({"_id": ObjectId(oid)})
       outcome = 'Success!'
@@ -438,22 +439,22 @@ def deployment_waiver():
     waiver_details = waivers_collection.find_one({"deployment": request.args['deployment'], "valid_from": {"$lte": datetime.datetime.now()}, "valid_to": {"$gt": datetime.datetime.now()}})
     details = {}
     try:
-      if 'GSSAPI' in waiver_details['project']['auth']['autoAuthMechanisms']:
+      if 'GSSAPI' in waiver_details['project']['auth']['deploymentAuthMechanisms']:
         details['gssapi_checked'] = 'checked'
     except (KeyError, TypeError):
       pass
     try:
-      if 'MONGODB-CR' in waiver_details['project']['auth']['autoAuthMechanisms']:
+      if 'MONGODB-CR' in waiver_details['project']['auth']['deploymentAuthMechanisms']:
         details['scram_sha_1_checked'] = 'checked'
     except (KeyError, TypeError):
       pass
     try:
-      if 'SCRAM-SHA-256' in waiver_details['project']['auth']['autoAuthMechanisms']:
+      if 'SCRAM-SHA-256' in waiver_details['project']['auth']['deploymentAuthMechanisms']:
         details['scram_sha_256_checked'] = 'checked'
     except (KeyError, TypeError):
       pass
     try:
-      if 'PLAIN' in waiver_details['project']['auth']['autoAuthMechanisms']:
+      if 'PLAIN' in waiver_details['project']['auth']['deploymentAuthMechanisms']:
         details['ldap_checked'] = 'checked'
     except (KeyError, TypeError):
       pass
@@ -471,6 +472,10 @@ def deployment_waiver():
       pass
     try:
         details['last_changed'] = waiver_details['changed_datetime']
+    except (KeyError, TypeError):
+      pass
+    try:
+      details['version'] = waiver_details['processes']['version']
     except (KeyError, TypeError):
       pass
     return render_template("waiver_details.html", details=details, deployment=request.args['deployment'])
@@ -491,9 +496,17 @@ def update_waiver(deployment):
       auth.append('SCRAM-SHA-256')
     if 'LDAP' in request.args:
       auth.append('PLAIN')
-    update_details = {"deployment": deployment,"valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"autoAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(),"comments": request.args['comments']}
+    update_details = {"deployment": deployment,"valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(),"comments": request.args['comments']}
+    new_waiver = {"deployment": deployment, "valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now()}
+    if 'version' in request.args:
+      if 'processes' not in update_details:
+        update_details['processes'] = {}
+      if 'processes' not in new_waiver:
+        new_waiver['processes'] = {}
+      update_details['processes']['version'] = request.args['version']
+      new_waiver['processes']['version'] = request.args['version']
     details = waivers_collection.update_one({"deployment": deployment},{"$set": update_details}, upsert=True)
-    waivers_archive_collection.insert_one({"deployment": deployment,"valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"autoAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now()})
+    waivers_archive_collection.insert_one(new_waiver)
     details = waivers_collection.find_one({"deployment": deployment})
     return render_template('new_waiver.html', new_waiver=dumps(details, indent=2))
   except OperationFailure as e:
