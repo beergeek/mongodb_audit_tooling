@@ -11,6 +11,7 @@ try:
   import re
   import ast
   import datetime
+  from pymongo import ReturnDocument
   from pymongo.errors import OperationFailure
   from bson.json_util import dumps, loads
   from bson.objectid import ObjectId
@@ -227,7 +228,7 @@ def get_user():
       }
     ]
 
-    print(user_pipeline)
+    # Indexes { users.user: 1, ts: 1 }, { fullDocument.un: 1, ts: 1 } on `logging.logs`
     event_output = list(audit_collection.aggregate(user_pipeline))
     events = []
     for event in event_output:
@@ -317,6 +318,7 @@ def get_host():
       }
     ]
 
+    # Indexes { fullDocument.deploymentDiff.diffs.processes.id: 1, source: 1, ts: 1 }, { fullDocument.clusterConfig.cluster.processes.hostname: 1, source: 1, ts: 1 }, { source: 1, tag: 1 } on `logging.logs`
     event_output = list(audit_collection.aggregate(host_pipeline))
     events = []
     for event in event_output:
@@ -396,6 +398,8 @@ def get_deployment():
           }
         }        
       ]
+
+      # Index { deployment: 1, ts: 1 } on `logging.configs_archive`
       event_output = list(config_archive_collection.aggregate(deployment_pipeline))
       title = "Between request.args['dtg_fixed_low_deployment'] and request.args['dtg_fixed_high_deployment']"
 
@@ -542,9 +546,9 @@ def update_waiver(deployment):
       new_waiver['processes']['version'] = request.args['version']
     update_details['schema_version'] = 0
     new_waiver['schema_version'] = 0
-    details = waivers_collection.update_one({"deployment": deployment},{"$set": update_details}, upsert=True)
+    # Index {"deployment": 1} on `logging.waivers`
+    details = waivers_collection.find_one_and_update({"deployment": deployment},{"$set": update_details}, upsert=True, return_document=ReturnDocument.AFTER)
     waivers_archive_collection.insert_one(new_waiver)
-    details = waivers_collection.find_one({"deployment": deployment})
     return render_template('new_waiver.html', new_waiver=dumps(details, indent=2))
   except OperationFailure as e:
     print(e.details)
