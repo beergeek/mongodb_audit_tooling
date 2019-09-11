@@ -173,10 +173,13 @@ def index():
       }
     ]
     
+    # indexes:
+    #
     output0 = list(audit_collection.aggregate(user_list_pipeline))
     users = []
     for user in output0:
       users.append(user['_id'])
+    # Canot use an index as is a multifield key
     output1 = list(audit_collection.distinct("fullDocument.clusterConfig.cluster.processes.hostname"))
     hosts = []
     for host in output1:
@@ -449,6 +452,7 @@ def update_standard(oid):
     standard_data = loads(request.args['standard'])
     standard_data.pop('_id')
     standard_data['valid_from'] = datetime.datetime.now()
+    standard_data['schema_version'] = 0
     response_update = standards_collection.update_one({"_id": ObjectId(oid)}, {"$set": standard_data}, upsert=True)
     standard_data['valid_to'] = datetime.datetime.now()
     standards_archive_collection.insert_one(standard_data)
@@ -534,6 +538,8 @@ def update_waiver(deployment):
         new_waiver['processes'] = {}
       update_details['processes']['version'] = request.args['version']
       new_waiver['processes']['version'] = request.args['version']
+    update_details['schema_version'] = 0
+    new_waiver['schema_version'] = 0
     details = waivers_collection.update_one({"deployment": deployment},{"$set": update_details}, upsert=True)
     waivers_archive_collection.insert_one(new_waiver)
     details = waivers_collection.find_one({"deployment": deployment})
