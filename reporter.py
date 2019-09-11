@@ -173,8 +173,7 @@ def index():
       }
     ]
     
-    # indexes:
-    #
+    # $facet is not smart enough to uses indexes :-(
     output0 = list(audit_collection.aggregate(user_list_pipeline))
     users = []
     for user in output0:
@@ -184,6 +183,7 @@ def index():
     hosts = []
     for host in output1:
       hosts.append(host)
+    # Index: {"deployment": 1} on `loggig.configs`
     output2 = list(config_collection.distinct("deployment"))
     deployments = []
     for deployment in output2:
@@ -440,6 +440,7 @@ def get_deployment_event_details(oid):
 @app.route("/admin", methods=['GET'])
 def admin_tasks():
   try:
+    # Index {'valid_to': 1} on `logging.standards`
     standards = standards_collection.find_one({"valid_to": {"$exists": False}})
     deployments = list(config_collection.distinct("deployment"))
     return render_template('admin_tasks.html', standards=dumps(standards, indent=2), deployments=deployments, standard_id=standards['_id'])
@@ -469,6 +470,7 @@ def update_standard(oid):
 @app.route("/deployment_waivers", methods=['GET'])
 def deployment_waiver():
   try:
+    # Index {'deployment': 1, 'valid_from': 1, 'valid_to': 1} on `logging.waivers`
     waiver_details = waivers_collection.find_one({"deployment": request.args['deployment'], "valid_from": {"$lte": datetime.datetime.now()}, "valid_to": {"$gt": datetime.datetime.now()}})
     details = {}
     try:
