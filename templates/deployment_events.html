@@ -9,16 +9,20 @@
       <p>{{title}}</p>
       <table>
         <th>Timestamp</th>
+        {% if counts %}
         <th>Issue Reoccurence</th>
         <th>Issue Start Date</th>
+        {% endif %}
         <th>Items Out of Compliance</th>
         <th>Items with Waivers</th>
         <th>Hosts</th>
       {% for event in events %}
       <tr>
         <td><a href="./deployment_event_details/{{event['_id']}}" target="_blank"><script>document.write(new Date("{{event['ts']}}"));</script></a></td>
+        {% if counts %}
         <td>{{event['uncompliance_count']}}</td>
         <td>{{event['start_datetime']}}</td>
+        {% endif %}
         <td id="evil">
             <table>
           {% for i in event['out_of_spec'] %}

@@ -33,7 +33,7 @@
         }
         function getDateLow(){
           x = new Date();
-          x.setMonth(x.getMonth() - 3);
+          x.setMonth(x.getMonth() - 1);
           document.getElementById("dtg_low").value = x;
           document.getElementById("dtg_fixed_low").value = x.toUTCString();
         };
@@ -44,7 +44,7 @@
         };
         function getDateLowHost(){
           x = new Date();
-          x.setMonth(x.getMonth() - 3);
+          x.setMonth(x.getMonth() - 1);
           document.getElementById("dtg_low_host").value = x;
           document.getElementById("dtg_fixed_low_host").value = x.toUTCString();
         };
@@ -55,7 +55,7 @@
         };
         function getDateLowDeployment(){
           x = new Date();
-          x.setMonth(x.getMonth() - 3);
+          x.setMonth(x.getMonth() - 1);
           document.getElementById("dtg_low_deployment").value = x;
           document.getElementById("dtg_fixed_low_deployment").value = x.toUTCString();
         };
@@ -67,6 +67,7 @@
       </script>
       <body onload="getDate();">
     <h1>Reports</h1>
+    All aggregation queries are limited to 100 documents
     <form action="./user_report" method="GET">
       <h2>PAUM Report</h2>
       <table>
@@ -82,11 +83,11 @@
         </tr>
         <tr>
           <td>Start Datetime:</td>
-          <td><input id="dtg_low" onchange="setUTCLow()" type="text" required name="dtg_low" value="" size="50"/> / <input id="dtg_fixed_low" type="text" readonly name="dtg_fixed_low" value="" size="35"/></td>
+          <td><input id="dtg_low" onchange="setUTCLow()" type="text" required name="dtg_low" value="" size="50"/> / <input id="dtg_fixed_low" type="text" readonly name="dtg_fixed_low" value="" size="35" /></td>
         </tr>
         <tr>
           <td>End Datetime:</td>
-          <td><input id="dtg_high" onchange="setUTCHigh()" type="text" required name="dtg_high" value="" size="50"/> / <input id="dtg_fixed_high" type="text" readonly name="dtg_fixed_high" value="" size="35"/></td>
+          <td><input id="dtg_high" onchange="setUTCHigh()" type="text" required name="dtg_high" value="" size="50"/> / <input id="dtg_fixed_high" type="text" readonly name="dtg_fixed_high" value="" size="35" /></td>
         </tr>
       </table>
       <br>

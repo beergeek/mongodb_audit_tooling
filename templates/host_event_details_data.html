@@ -6,13 +6,16 @@
   </head>
   <body>
     <h1>CCA Event Report</h1>
-    <h2><script>document.write(new Date("{{dtg}}"));</script></h2>
+      <h2>{{oid}}: <script>document.write(new Date("{{dtg}}"));</script></h2>
       <table>
-        <th>Details</th>
+        <th class="diff">Diff</th>
+        <th class="data">Details</th>
       <tr>
-        <td><pre id="data">{{ data }}</pre></td>
+        <td class="diff"><pre class="wrapper">{{diff}}</pre></td>
+        <td class="data"><pre class="wrapper">{{ data }}</pre></td>
       </tr>
       </table>
       <br>
   </body>
 </html>
+~

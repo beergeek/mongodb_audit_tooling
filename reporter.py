@@ -108,88 +108,16 @@ waivers_archive_collection = audit_db['waivers_archive']
 # main route 
 @app.route("/")
 def index():
-  try:
-    user_list_pipeline = [
-      {
-        "$facet": {
-          "un": [
-            {
-              "$match": {
-                "fullDocument.un": {
-                  "$ne": None
-                }
-              }
-            },
-            {
-              "$group": {
-                "_id": "$fullDocument.un"
-              }
-            }
-          ],
-          "users": [
-            {
-              "$match": {
-                "users.user": {
-                  "$ne": None
-                }
-              }
-            },
-            {
-              "$group": {
-                "_id": {
-                  "$arrayElemAt": [
-                    "$users.user",
-                    0
-                  ]
-                }
-              }
-            }
-          ]
-        }
-      },
-      {
-        "$project": {
-          "users": {
-            "$concatArrays": [
-              "$users._id",
-              "$un._id"
-            ]
-          }
-        }
-      },
-      {
-        "$group": {
-          "_id": "$users"
-        }
-      },
-      {
-        "$unwind": {
-          "path": "$_id"
-        }
-      },
-      {
-        "$match": {
-          "_id": {"$ne": None}
-        }
-      }
-    ]
-    
-    # $facet is not smart enough to uses indexes :-(
-    output0 = list(audit_collection.aggregate(user_list_pipeline))
-    users = []
-    for user in output0:
-      users.append(user['_id'])
-    # Canot use an index as is a multifield key
+  try: 
+    # list of users
+    # Index: {"users_array": 1} on `loggig.configs`
+    output0 = list(audit_collection.distinct("users_array"))
+    output0 = [ elem for elem in output0 if elem != None]
+    # Multikey indexes can't be used for distinct
     output1 = list(audit_collection.distinct("fullDocument.clusterConfig.cluster.processes.hostname"))
-    hosts = []
-    for host in output1:
-      hosts.append(host)
     # Index: {"deployment": 1} on `loggig.configs`
     output2 = list(config_collection.distinct("deployment"))
-    deployments = []
-    for deployment in output2:
-      deployments.append(deployment)
-    return render_template('index.html', users=users, hosts=hosts, deployments=deployments)
+    return render_template('index.html', users=output0, hosts=output1, deployments=output2)
   except OperationFailure as e:
     print(e.details)
     logging.error(e.details)
@@ -225,11 +153,14 @@ def get_user():
         "$sort": {
           "ts": -1
         }
+      },
+      {
+        "$limit": 100
       }
     ]
 
     # Indexes { users.user: 1, ts: 1 }, { fullDocument.un: 1, ts: 1 } on `logging.logs`
-    event_output = list(audit_collection.aggregate(user_pipeline))
+    event_output = list(audit_collection.aggregate(user_pipeline,batchSize=100))
     events = []
     for event in event_output:
       events.append(event)
@@ -315,11 +246,14 @@ def get_host():
         "$sort": {
           "ts": -1
         }
+      },
+      {
+        "$limit": 100
       }
     ]
 
     # Indexes { fullDocument.deploymentDiff.diffs.processes.id: 1, source: 1, ts: 1 }, { fullDocument.clusterConfig.cluster.processes.hostname: 1, source: 1, ts: 1 }, { source: 1, tag: 1 } on `logging.logs`
-    event_output = list(audit_collection.aggregate(host_pipeline))
+    event_output = list(audit_collection.aggregate(host_pipeline,batchSize=100))
     events = []
     for event in event_output:
       if not ObjectId.is_valid(event['_id']):
@@ -341,7 +275,11 @@ def get_host_event_details(oid):
     else:
       host_data = audit_collection.find_one({"_id": ast.literal_eval(oid)})
     formatted = dumps(host_data, indent=2)
-    return render_template('host_event_details_data.html', data=formatted, dtg=host_data['ts'])
+    if 'fullDocument' in host_data:
+      formatted_diff = dumps(host_data['fullDocument']['deploymentDiff']['diffs'], indent=2)
+    else:
+      formatted_diff = 'No data'
+    return render_template('host_event_details_data.html', data=formatted, diff=formatted_diff, dtg=host_data['ts'])
   except OperationFailure as e:
     print(e.details)
 
@@ -368,10 +306,14 @@ def get_deployment():
           "$sort": {
             "ts": -1
           }
+        },
+        {
+          "$limit": 100
         }
       ]
       event_output = list(config_collection.aggregate(deployment_pipeline))
       title = 'Latest report'
+      counts = True
     else:
       deployment_pipeline = [
         {
@@ -396,12 +338,16 @@ def get_deployment():
           "$sort": {
             "ts": -1
           }
-        }        
+        },
+        {
+          "$limit": 100
+        }     
       ]
 
       # Index { deployment: 1, ts: 1 } on `logging.configs_archive`
-      event_output = list(config_archive_collection.aggregate(deployment_pipeline))
-      title = "Between request.args['dtg_fixed_low_deployment'] and request.args['dtg_fixed_high_deployment']"
+      event_output = list(config_archive_collection.aggregate(deployment_pipeline,batchSize=100))
+      title = 'Between ' + request.args['dtg_fixed_low_deployment'] + ' and ' + request.args['dtg_fixed_high_deployment']
+      counts = False
 
     events = []
     for event in event_output:
@@ -424,7 +370,7 @@ def get_deployment():
         print(event)
     if DEBUG:
       print(events)
-    return render_template('deployment_events.html', title=title, events=events, deployment=request.args['deployment'])
+    return render_template('deployment_events.html', counts=counts, title=title, events=events, deployment=request.args['deployment'])
   except OperationFailure as e:
     print(e.details)
 

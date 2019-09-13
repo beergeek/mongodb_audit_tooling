@@ -1,11 +1,40 @@
 try:
-  import time, pymongo, configparser, os, sys, json, socket, logging, datetime, kerberos, re
+  import configparser
+  import datetime
+  import json
+  import kerberos
+  import logging
+  import os
+  import pymongo
+  import re
+  import signal
+  import socket
+  import sys
+  import sys
+  import time
   from pymongo.errors import DuplicateKeyError, OperationFailure, InvalidDocument
   from bson.json_util import loads
-  import sys
 except ImportError as e:
   print(e)
   exit(1)
+
+def write_resume_token():
+  if resume_token:
+    if sys.version_info[0] < 3:
+      p = format(time.mktime(resume_token.timetuple()), '.1f')
+    else:
+      p = datetime.datetime.timestamp(resume_token)
+    outfile = open(sys.path[0] + '/.log_tokens', 'w')
+    outfile.write(p)
+    outfile.close()
+    logging.info("RESUME TOKEN: %s %s" % (resume_token, p))
+  logging.info("TERMINATING PROCESSING: %s" % datetime.datetime.now())
+  sys.exit(0)
+
+# global varible
+resume_token = None
+signal.signal(signal.SIGINT, write_resume_token)
+signal.signal(signal.SIGTERM, write_resume_token)
 
 class UTC(datetime.tzinfo):
   """UTC"""
@@ -18,7 +47,6 @@ class UTC(datetime.tzinfo):
 
   def dst(self, dt):
     return datetime.timedelta(hours=1)
-
 
 def get_config():
   CONF_FILE = sys.path[0] + '/log_processor.conf'
@@ -94,8 +122,8 @@ def get_resume_token():
     token = create_tz_dtg(0)
   return token
 
+# Record our startup and config
 def record_startup(config_array, debug=False):
-  logging.getLogger(__name__)
   if debug == True:
     logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
     logging.debug("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', config_array['audit_db_connection_string']))
@@ -112,6 +140,7 @@ def record_startup(config_array, debug=False):
   else:
     logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
 
+# Connect to MongoDB
 def audit_db_client(audit_db_data, debug=False):
   try:
     if audit_db_data['audit_db_ssl'] is True:
@@ -133,6 +162,7 @@ def audit_db_client(audit_db_data, debug=False):
   collection = db['logs']
   return collection
 
+# check if our keys are valid for BSON
 def clean_data(unclean_json, debug=False):
   if type(unclean_json) is dict:
     for k, v in unclean_json.items():
@@ -152,6 +182,7 @@ def clean_data(unclean_json, debug=False):
       unclean_json[k.replace('.','_')] = unclean_json.pop(k)
   return unclean_json
 
+# Diving further down the rabbit hole
 def clean_list_data(unclean_data, debug=False):
   if type(unclean_data) is list:
     for value in unclean_data:
@@ -166,88 +197,98 @@ def clean_list_data(unclean_data, debug=False):
   return unclean_data
 
 def main():
+  # declare our log path
   LOG_FILE = sys.path[0] + '/log_processor.log'
+
+  # get our config
   config_data = get_config()
+
+  # retrieve and add our resume token to the config data
+  # `resume_token` is a global variable so exit handlers can grab it easily
+  global resume_token
   config_data['resume_token'] = get_resume_token()
   resume_token = config_data['resume_token']
+
+  # setup logging
   debug = config_data['debug']
   if debug == True:
     logging.basicConfig(filename=LOG_FILE,level=logging.DEBUG)
   else:
     logging.basicConfig(filename=LOG_FILE,level=logging.INFO)
+
+  # log our startup and the various settings
   record_startup(config_data, debug)
+
+  # Connect to the mongodb database
   audit_db = audit_db_client(config_data, debug)
+
   # set for a new start or restart
   restart = True
+
+  # if no audit file we will just wait to see if one turns up :-)
   while os.path.isfile(config_data['audit_log']) == False:
     time.sleep(10)
   f = open(config_data['audit_log'], "rb")
-  try:
-    while 1:
-      where = f.tell()
-      line = f.readline()
-      if not line:
-          time.sleep(1)
-          f.seek(where)
-      else:
-        try:
-          # retrieve line
-          unclean_line = loads(line)
-          if config_data['debug']:
-            print("CURRENT TS: %s" % unclean_line['ts'])
-          # check if this was our last resume token or restart is not true
-          # On restart we do not want to process the same data again
-          if (unclean_line['ts'] > resume_token) or restart == False:
-            restart = False
-            # clean line (if required)
-            clean_line = clean_data(unclean_line, debug)
-            # retrieve the array of users so our subsequent querying is easier and faster
-            clean_line['users_array'] = []
-            for user_data in clean_line['users']:
-              clean_line['users_array'].append(user_data['user'])
-            # Insert tags as required
-            if ('command' in clean_line['param'] and clean_line['param']['command'] in config_data['elevated_config_events']) or clean_line['atype'] in config_data['elevated_config_events']:
-              clean_line['tag'] = 'CONFIG EVENT'
-            if 'command' in clean_line['param'] and clean_line['param']['command'] in config_data['elevated_ops_events']:
-              clean_line['tag'] = 'OPS EVENT'
-            elif 'command' in clean_line['param'] and clean_line['param']['command'] in config_data['elevated_app_events']:
-              clean_line['tag'] = 'APP EVENT'
-            clean_line['host'] = socket.gethostname()
-            clean_line['source'] = 'DATABASE AUDIT'
-            resume_token = clean_line['ts']
-            # set schema version
-            clean_line['schema_version'] = 0
-            try:
-              # insert data
-              if debug:
-                print(clean_line)
-                print("RESUME TOKEN: %s" % resume_token)
-              audit_db.insert_one(clean_line)
-            except OperationFailure as e:
-              print(e.details)
-          else:
-            if debug is True:
-              print("Datestamp already seen: %s" % unclean_line['ts'])
-        except ValueError as e:
-          print('\033[91m' + ("Value Error: %s\nDocument: %s" % (e, unclean_line)) + '\033[m')
-          logging.error("Value Error: %s\nDocument: %s" % (e, unclean_line))
-          continue
-        except InvalidDocument as e:
-          print('\033[91m' + ("Document Error: %s\nDocument: %s" % (e, unclean_line)) + '\033[m')
-          logging.error("Document Error: %s\nDocument: %s" % (e, unclean_line))
-          continue
-  finally:
-    if resume_token:
-      if sys.version_info[0] < 3:
-        p = format(time.mktime(resume_token.timetuple()), '.1f')
-      else:
-        p = datetime.datetime.timestamp(resume_token)
-      if debug is True:
-        print("OUT TOKEN: %s" % p)
-      outfile = open(sys.path[0] + '/.log_tokens', 'w')
-      outfile.write(p)
-      outfile.close()
-      logging.info("RESUME TOKEN: %s %s" % (resume_token, p))
-    logging.info("TERMINATING PROCESSING: %s" % datetime.datetime.now())
 
-if __name__ == "__main__": main()
+  # start reading our audit log
+  while 1:
+    where = f.tell()
+    line = f.readline()
+    if not line:
+        time.sleep(1)
+        f.seek(where)
+    else:
+      try:
+        # retrieve line
+        unclean_line = loads(line)
+        if config_data['debug']:
+          print("CURRENT TS: %s" % unclean_line['ts'])
+        
+        # check if this was our last resume token or restart is not true
+        # On restart we do not want to process the same data again
+        if (unclean_line['ts'] > resume_token) or restart == False:
+          # we know we are now not in the restart for first start state, so declare that
+          restart = False
+          # clean line (if required) to remove some un-BSON key names
+          clean_line = clean_data(unclean_line, debug)
+          # retrieve the array of users so our subsequent querying is easier and faster
+          clean_line['users_array'] = []
+          for user_data in clean_line['users']:
+            clean_line['users_array'].append(user_data['user'])
+          # Insert tags as required
+          if ('command' in clean_line['param'] and clean_line['param']['command'] in config_data['elevated_config_events']) or clean_line['atype'] in config_data['elevated_config_events']:
+            clean_line['tag'] = 'CONFIG EVENT'
+          if 'command' in clean_line['param'] and clean_line['param']['command'] in config_data['elevated_ops_events']:
+            clean_line['tag'] = 'OPS EVENT'
+          elif 'command' in clean_line['param'] and clean_line['param']['command'] in config_data['elevated_app_events']:
+            clean_line['tag'] = 'APP EVENT'
+          clean_line['host'] = socket.gethostname()
+          clean_line['source'] = 'DATABASE AUDIT'
+          # set schema version
+          clean_line['schema_version'] = 0
+          # Get our newest resume token
+          resume_token = clean_line['ts']
+          if debug:
+            print(clean_line)
+            print("RESUME TOKEN: %s" % resume_token)
+          # insert data
+          audit_db.insert_one(clean_line)
+        else:
+          if debug is True:
+            print("Datestamp already seen: %s" % unclean_line['ts'])
+            logging.debug("Datestamp already seen: %s" % unclean_line['ts'])
+      except OperationFailure as e:
+        print('\033[91m' + ("Operational Error: %s\nDocument: %s" % (e, unclean_line)) + '\033[m')
+        logging.error("Operational Error: %s\nDocument: %s" % (e, unclean_line))
+      except ValueError as e:
+        print('\033[91m' + ("Value Error: %s\nDocument: %s" % (e, unclean_line)) + '\033[m')
+        logging.error("Value Error: %s\nDocument: %s" % (e, unclean_line))
+        continue
+      except InvalidDocument as e:
+        print('\033[91m' + ("Document Error: %s\nDocument: %s" % (e, unclean_line)) + '\033[m')
+        logging.error("Document Error: %s\nDocument: %s" % (e, unclean_line))
+        continue
+
+if __name__ == "__main__":
+  logger = logging.getLogger(__name__)
+  main()

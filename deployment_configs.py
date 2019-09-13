@@ -316,11 +316,11 @@ def main():
             if 'schema_version' not in desired_state:
               desired_state['schema_version'] = 0
 
-            # If we have a compliance issueincrement the occurence counter.
+            # If we have a compliance issue increment the occurence counter.
             # Determine if the deployment already has a compliance issue occurring.
             # If not set the start date for the issue
             # If there is no compliance issue, reset the date and counter.
-            if 'start_datetime' in current_state:
+            if current_state and 'start_datetime' in current_state:
               if DEBUG:
                 print("RECORDED DATA: %s" % desired_state)
               result = audit_collection.update_one(
@@ -340,7 +340,7 @@ def main():
               result = audit_collection.update_one(
                 {
                   "deployment": desired_state['deployment'],
-                  "ts": current_state['ts']
+                  "ts": desired_state['ts']
                 },
                 {
                   "$set": desired_state,
@@ -375,5 +375,7 @@ def main():
       except OperationFailure as e:
         print(e.details)
         logging.error(e.details)
+      except TypeError as e:
+        print(e)
 
 if __name__ == "__main__": main()
