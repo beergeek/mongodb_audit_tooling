@@ -68,7 +68,7 @@ def get_config():
     if config_options['audit_db_ssl'] is True:
       config_options['audit_db_ssl_pem'] = config.get('audit_db','ssl_pem_path')
       config_options['audit_db_ssl_ca'] = config.get('audit_db', 'ssl_ca_cert_path')
-    config_options['audit_db_timeout'] = config.getint('audit_db','timeout', fallback=100000)
+    config_options['audit_db_timeout'] = config.getint('audit_db','timeout', fallback=10)
     config_options['elevated_ops_events'] = config.get('general','elevated_ops_events',fallback='').split(',')
     config_options['elevated_config_events'] = config.get('general','elevated_config_events',fallback='').split(',')
     config_options['elevated_app_events'] = config.get('general','elevated_app_events',fallback='').split(',')

@@ -37,8 +37,8 @@ try:
   if AUDIT_DB_SSL is True:
     AUDIT_DB_SSL_PEM = config.get('audit_db','ssl_pem_path')
     AUDIT_DB_SSL_CA = config.get('audit_db', 'ssl_ca_cert_path')
-  OPS_MANAGER_TIMEOUT = config.getint('ops_manager','timeout', fallback=1000)
-  AUDIT_DB_TIMEOUT = config.getint('audit_db','timeout', fallback=1000)
+  OPS_MANAGER_TIMEOUT = config.getint('ops_manager','timeout', fallback=10)
+  AUDIT_DB_TIMEOUT = config.getint('audit_db','timeout', fallback=10)
 except configparser.NoOptionError as e:
   logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
   logging.error('The config file must include the `connection_string` option in the `audit_db` section')
@@ -314,6 +314,7 @@ def get_deployment():
       event_output = list(config_collection.aggregate(deployment_pipeline))
       title = 'Latest report'
       counts = True
+      search_type = 'latest'
     else:
       deployment_pipeline = [
         {
@@ -343,11 +344,11 @@ def get_deployment():
           "$limit": 100
         }     
       ]
-
       # Index { deployment: 1, ts: 1 } on `logging.configs_archive`
       event_output = list(config_archive_collection.aggregate(deployment_pipeline,batchSize=100))
       title = 'Between ' + request.args['dtg_fixed_low_deployment'] + ' and ' + request.args['dtg_fixed_high_deployment']
       counts = False
+      search_type = 'range'
 
     events = []
     for event in event_output:
@@ -370,18 +371,24 @@ def get_deployment():
         print(event)
     if DEBUG:
       print(events)
-    return render_template('deployment_events.html', counts=counts, title=title, events=events, deployment=request.args['deployment'])
+    return render_template('deployment_events.html', counts=counts, title=title, events=events, deployment=request.args['deployment'], type=search_type)
   except OperationFailure as e:
     print(e.details)
 
 
-@app.route("/deployment_event_details/<oid>", methods=['GET'])
-def get_deployment_event_details(oid):
+@app.route("/deployment_event_details", methods=['GET'])
+def get_deployment_event_details():
   try:
-    if ObjectId.is_valid(oid):
-      deployment_data = config_collection.find_one({"_id": ObjectId(oid)},{"compliance": 0})
+    print("OID: %s" % request.args['oid'])
+    print("type: %s" % request.args['search_type'])
+    if request.args['search_type'] == 'latest':
+      coll = config_collection
     else:
-      deployment_data = config_collection.find_one({"_id": ast.literal_eval(oid)},{"compliance": 0})
+      coll = config_archive_collection
+    if ObjectId.is_valid(request.args['oid']):
+      deployment_data = coll.find_one({"_id": ObjectId(request.args['oid'])},{"compliance": 0})
+    else:
+      deployment_data = coll.find_one({"_id": ast.literal_eval(request.args['oid'])},{"compliance": 0})
     formatted = dumps(deployment_data, indent=2)
     return render_template('deployment_event_details_data.html', data=formatted, dtg=deployment_data['ts'], oid=deployment_data['deployment'])
   except OperationFailure as e:

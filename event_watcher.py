@@ -55,8 +55,8 @@ def get_config():
     if config_options['AUDIT_DB_SSL'] is True:
       config_options['AUDIT_DB_SSL_PEM'] = config.get('audit_db','ssl_pem_path')
       config_options['AUDIT_DB_SSL_CA'] = config.get('audit_db', 'ssl_ca_cert_path')
-    config_options['OPS_MANAGER_TIMEOUT'] = config.getint('ops_manager_db','timeout', fallback=10000)
-    config_options['AUDIT_DB_TIMEOUT'] = config.getint('audit_db','timeout', fallback=10000)
+    config_options['OPS_MANAGER_TIMEOUT'] = config.getint('ops_manager_db','timeout', fallback=10)
+    config_options['AUDIT_DB_TIMEOUT'] = config.getint('audit_db','timeout', fallback=10)
     temp_pipeline = config.get('ops_manager_db','event_pipeline',fallback=None)
     if temp_pipeline is not None:
       config_options['PIPELINE'] = ast.literal_eval(temp_pipeline)

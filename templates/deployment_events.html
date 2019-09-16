@@ -18,7 +18,7 @@
         <th>Hosts</th>
       {% for event in events %}
       <tr>
-        <td><a href="./deployment_event_details/{{event['_id']}}" target="_blank"><script>document.write(new Date("{{event['ts']}}"));</script></a></td>
+        <td><a href="./deployment_event_details?oid={{event['_id']}}&search_type={{type}}" target="_blank"><script>document.write(new Date("{{event['ts']}}"));</script></a></td>
         {% if counts %}
         <td>{{event['uncompliance_count']}}</td>
         <td>{{event['start_datetime']}}</td>

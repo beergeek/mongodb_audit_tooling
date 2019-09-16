@@ -13,6 +13,7 @@ try:
   import sys
   import datetime
   import re
+  from bson.json_util import dumps
   from pymongo.errors import OperationFailure,PyMongoError
   if sys.version_info[0] >= 3:
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -45,8 +46,8 @@ try:
   if AUDIT_DB_SSL is True:
     AUDIT_DB_SSL_PEM = config.get('audit_db','ssl_pem_path')
     AUDIT_DB_SSL_CA = config.get('audit_db', 'ssl_ca_cert_path')
-  OPS_MANAGER_TIMEOUT = config.getint('ops_manager','timeout', fallback=1000)
-  AUDIT_DB_TIMEOUT = config.getint('audit_db','timeout', fallback=1000)
+  OPS_MANAGER_TIMEOUT = config.getint('ops_manager','timeout', fallback=10)
+  AUDIT_DB_TIMEOUT = config.getint('audit_db','timeout', fallback=10)
   EXCLUDED_ROOT_KEYS = config.get('general','excluded_root_keys',fallback=[]).split(',')
 except configparser.NoOptionError as e:
   logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
@@ -99,7 +100,7 @@ else:
   logging.basicConfig(filename=LOG_FILE,level=logging.INFO)
   logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
 
-# conneciton to the audit database
+# connection to the audit database
 try:
   if AUDIT_DB_SSL is True:
     if DEBUG is True:
@@ -133,6 +134,10 @@ def get(endpoint):
 def get_standards():
   try:
     standard = audit_db.standards.find_one({"valid_to": {"$exists": False}})
+    if standard is None:
+      standard = {}
+    if DEBUG:
+      print("STANDARD: %s" % standard)
   except OperationFailure as e:
     print(e.details)
     logging.error(e.details)
@@ -140,10 +145,11 @@ def get_standards():
 
 def get_waiver(deployment):
   try:
-    x = {"deployment": deployment, "valid_to": {"$gt": datetime.datetime.now()}}
     waiver = audit_db.waivers.find_one({"deployment": deployment, "valid_to": {"$gt": datetime.datetime.now()}})
-    if not waiver:
-      return {}
+    if waiver is None:
+      waiver = {}
+    if DEBUG:
+      print("WAIVER: %s" % waiver)
   except OperationFailure as e:
     print(e.details)
     logging.error(e.details)
@@ -187,7 +193,6 @@ def check_dict(root, s_dict, comp_dict, waivers={}):
           failure_data['issue'].append("`%s: %s`, should be `%s`" % (k , vd, vs))
       elif vs != vd:
         try:
-          #x = reduce(dict.get, k.split("."), waivers)
           if waivers[ks] == vd:
             if DEBUG:
               print("\033[93mWaiver: `%s: %s, should be %s`\033[m" % (k, vd, vs))
@@ -242,85 +247,144 @@ def check_list(k, s_array, d_array, waivers):
         break
   return failure_data
 
+def get_users(hostname, port, replica_set, auth_method='GSSAPI', auth_source="$external", debug=False):
+  try:
+    user_list = []
+    local_connection_string = "mongodb://auditwriter%40MONGODB.LOCAL@" + hostname + ":" + str(port) + "/?replicaSet=" + replica_set + "&authSource=" + auth_source + "&authMechanism=" + auth_method
+    local = pymongo.MongoClient(local_connection_string, serverSelectionTimeoutMS=AUDIT_DB_TIMEOUT, ssl=True, ssl_certfile=AUDIT_DB_SSL_PEM, ssl_ca_certs=AUDIT_DB_SSL_CA)
+    #serverVersion = tuple(local.server_info()['version'].split('.'))
+    local_db = local['admin']
+    user_collection = local_db['system.users']
+    #if serverVersion < tuple("4.0.0".split(".")):
+    users = user_collection.aggregate([{"$project": {"list": {"$objectToArray": "$credentials"}}},{"$project": {'mech': "$list.k"}}])
+    for user in users:
+      user_list.append(user['_id'] + ": " + dumps(user['mech']))
+    #else:
+    # This fails because of strange permissions issues
+    #  users = local_db.command("usersInfo", forAllDBs=True)
+    return user_list
+  except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure, pymongo.errors.ConfigurationError, pymongo.errors.OperationFailure) as e:
+    logging.error("Cannot connect to deployment DB: %s" %e)
+    print("Cannot connect to deployment DB: %s" %e)
+    return "Could not connect for %s" % hostname
+
 def main():
   STANDARDS = get_standards()
   if DEBUG:
     print(STANDARDS)
   DEPLOYMENTS = get('/groups')
   for deployment in DEPLOYMENTS['results']:
-    desired_state = get('/groups/' + deployment['id'] + '/automationConfig')
-    # determine if a waiver exists for this deployment
-    waiver_details = get_waiver(deployment['name'] + " - (ORG: " + deployment['orgId'] + ")")
-    if DEBUG:
-      print("DEPLOYMENT NAME: %s" % deployment['name'])
-      print("WAIVER: %s" % waiver_details)
-    desired_state['compliance'] = []
-    # Only check for compliance if there is a standard to check against
-    if STANDARDS:
-      if 'project' not in waiver_details:
-        waiver_details['project'] = {}
-      deployment_compliance = check_dict('', STANDARDS['project'], desired_state, waiver_details['project'])
-      deployment_compliance['host'] = 'Project Level'
-      # Deep copy because Python does copy by reference
-      desired_state['compliance'].append(copy.deepcopy(deployment_compliance))
-    # Determine if project has any members
-    if desired_state['processes']:
-      for instance in desired_state['processes']:
-        # Only check for compliance if there is a standard to check against
-        if STANDARDS:
-          if 'processes' not in waiver_details:
-            waiver_details['processes'] = {}
-          compliance = check_dict("processes", STANDARDS['processes'], instance, waiver_details['processes'])
-          # If we have a compliance issue or waiver in place we record that too
-          if compliance:
-            compliance['host'] = instance['hostname']
+    if deployment['hostCounts']['mongos'] > 0 or deployment['hostCounts']['primary'] > 0:
+      compliance = []
+      host_list = get('/groups/' + deployment['id'] + '/hosts')
+      for host in host_list['results']:
+        if host['typeName'] == 'REPLICA_PRIMARY':
+          print(host['hostname'])
+          deployment_users = get_users(host['hostname'], host['port'], host['replicaSetName'])
+          print("USERS: %s " % deployment_users)
+      desired_state = get('/groups/' + deployment['id'] + '/automationConfig')
+      # determine if a waiver exists for this deployment
+      waiver_details = get_waiver(deployment['name'] + " - (ORG: " + deployment['orgId'] + ")")
+      if DEBUG:
+        print("DEPLOYMENT NAME: %s" % deployment['name'])
+        print("WAIVER: %s" % waiver_details)
+      desired_state['compliance'] = []
+      # Only check for compliance if there is a standard to check against
+      if STANDARDS:
+        if 'project' not in waiver_details:
+          waiver_details['project'] = {}
+        deployment_compliance = check_dict('', STANDARDS['project'], desired_state, waiver_details['project'])
+        deployment_compliance['host'] = 'Project Level'
+        # Deep copy because Python does copy by reference
+        desired_state['compliance'].append(copy.deepcopy(deployment_compliance))
+      # Determine if project has any members
+      if desired_state['processes']:
+        for instance in desired_state['processes']:
+          # Only check for compliance if there is a standard to check against
+          if STANDARDS:
+            if 'processes' not in waiver_details:
+              waiver_details['processes'] = {}
+            compliance = check_dict("processes", STANDARDS['processes'], instance, waiver_details['processes'])
+            # If we have a compliance issue or waiver in place we record that too
+            if compliance:
+              compliance['host'] = instance['hostname']
+              if DEBUG:
+                print("COMPLIANCE: %s" % compliance)
+              # Deep copy because Python does copy by reference
+              desired_state['compliance'].append(copy.deepcopy(compliance))
+        desired_state['deployment'] = deployment['name'] + " - (ORG: " + deployment['orgId'] + ")"
+        for remove_key in EXCLUDED_ROOT_KEYS:
+          if remove_key in desired_state:
+            desired_state.pop(remove_key)
             if DEBUG:
-              print("COMPLIANCE: %s" % compliance)
-            # Deep copy because Python does copy by reference
-            desired_state['compliance'].append(copy.deepcopy(compliance))
-      desired_state['deployment'] = deployment['name'] + " - (ORG: " + deployment['orgId'] + ")"
-      for remove_key in EXCLUDED_ROOT_KEYS:
-        if remove_key in desired_state:
-          desired_state.pop(remove_key)
-          if DEBUG:
-            print("Removed Key: %s" % remove_key)
-      if 'key' in desired_state['auth']:
-        desired_state['auth']['key'] = '<REDACTED>'
-      if 'autoPwd' in desired_state['auth']:
-        desired_state['auth']['autoPwd'] = '<REDACTED>'
-      if 'ldap' in desired_state and 'bindQueryPassword' in desired_state['ldap']:
-        desired_state['ldap']['bindQueryPassword'] = '<REDACTED>'
-      for user in desired_state['auth']['usersWanted']:
-        if 'pwd' in user:
-          user['pwd'] = '<REDACTED>'
-        if 'scramSha1Creds' in user:
-          user['scramSha1Creds'] = '<REDACTED>'
-        if 'scramSha256Creds' in user:
-          user['scramSha256Creds'] = '<REDACTED>'
+              print("Removed Key: %s" % remove_key)
+        if 'key' in desired_state['auth']:
+          desired_state['auth']['key'] = '<REDACTED>'
+        if 'autoPwd' in desired_state['auth']:
+          desired_state['auth']['autoPwd'] = '<REDACTED>'
+        if 'ldap' in desired_state and 'bindQueryPassword' in desired_state['ldap']:
+          desired_state['ldap']['bindQueryPassword'] = '<REDACTED>'
+        for user in desired_state['auth']['usersWanted']:
+          if 'pwd' in user:
+            user['pwd'] = '<REDACTED>'
+          if 'scramSha1Creds' in user:
+            user['scramSha1Creds'] = '<REDACTED>'
+          if 'scramSha256Creds' in user:
+            user['scramSha256Creds'] = '<REDACTED>'
 
-      # write results to audit db
-      desired_state['ts'] = datetime.datetime.now()
-      try:
-        for i in range(0,4):
-          if 'issue' in compliance and len(compliance['issue']) > 0:
-            # Get the current timestamp of the document so we can check if it is written before we modify
-            current_state = audit_collection.find_one(
-              {
-                "deployment": desired_state['deployment']
-              },
-              {
-                "start_datetime": 1, "ts": 1
-              }
-            )
-            # set our schema version
-            if 'schema_version' not in desired_state:
-              desired_state['schema_version'] = 0
+        # write results to audit db
+        desired_state['ts'] = datetime.datetime.now()
+        try:
+          for i in range(0,4):
+            if 'issue' in compliance and len(compliance['issue']) > 0:
+              # Get the current timestamp of the document so we can check if it is written before we modify
+              current_state = audit_collection.find_one(
+                {
+                  "deployment": desired_state['deployment']
+                },
+                {
+                  "start_datetime": 1, "ts": 1
+                }
+              )
+              # set our schema version
+              if 'schema_version' not in desired_state:
+                desired_state['schema_version'] = 0
 
-            # If we have a compliance issue increment the occurence counter.
-            # Determine if the deployment already has a compliance issue occurring.
-            # If not set the start date for the issue
-            # If there is no compliance issue, reset the date and counter.
-            if current_state and 'start_datetime' in current_state:
+              # If we have a compliance issue increment the occurence counter.
+              # Determine if the deployment already has a compliance issue occurring.
+              # If not set the start date for the issue
+              # If there is no compliance issue, reset the date and counter.
+              if current_state and 'start_datetime' in current_state:
+                if DEBUG:
+                  print("RECORDED DATA: %s" % dumps(desired_state, indent=2))
+                result = audit_collection.update_one(
+                  {
+                    "deployment": desired_state['deployment'],
+                    "ts": current_state['ts']
+                  },
+                  {
+                    "$set": desired_state,
+                    "$inc": {"uncompliance_count": 1}
+                  }
+                )
+              else:
+                desired_state['start_datetime'] = desired_state['ts']
+                if DEBUG:
+                  print("RECORDED DATA: %s" % desired_state)
+                result = audit_collection.update_one(
+                  {
+                    "deployment": desired_state['deployment'],
+                    "ts": desired_state['ts']
+                  },
+                  {
+                    "$set": desired_state,
+                    "$inc": {"uncompliance_count": 1}
+                  },
+                  upsert=True
+                )
+            else:
+              # No compliance issues
+              desired_state['uncompliance_count'] = 0
               if DEBUG:
                 print("RECORDED DATA: %s" % desired_state)
               result = audit_collection.update_one(
@@ -330,52 +394,24 @@ def main():
                 },
                 {
                   "$set": desired_state,
-                  "$inc": {"uncompliance_count": 1}
-                }
-              )
-            else:
-              desired_state['start_datetime'] = desired_state['ts']
-              if DEBUG:
-                print("RECORDED DATA: %s" % desired_state)
-              result = audit_collection.update_one(
-                {
-                  "deployment": desired_state['deployment'],
-                  "ts": desired_state['ts']
-                },
-                {
-                  "$set": desired_state,
-                  "$inc": {"uncompliance_count": 1}
+                  "$unset": {"start_datetime": ""}
                 },
                 upsert=True
               )
-          else:
-            # No compliance issues
-            desired_state['uncompliance_count'] = 0
-            if DEBUG:
-              print("RECORDED DATA: %s" % desired_state)
-            result = audit_collection.update_one(
-              {
-                "deployment": desired_state['deployment'],
-                "ts": current_state['ts']
-              },
-              {
-                "$set": desired_state,
-                "$unset": {"start_datetime": ""}
-              },
-              upsert=True
-            )
-          if result.matched_count == 1 or result.upserted_id:
-            # update was successful, so write to archive as well, then exit the loop
-            # retry if it was not successful
-            archive_collection.insert_one(desired_state)
-            break
-          elif i == 4:
-            print("Failed to update the correct document, exiting")
-            raise PyMongoError("Failed to update the correct document, exiting")
-      except OperationFailure as e:
-        print(e.details)
-        logging.error(e.details)
-      except TypeError as e:
-        print(e)
+            result = {}
+            result['matched_count'] = 1
+            if result['matched_count'] == 1 or result['upserted_id']:
+              # update was successful, so write to archive as well, then exit the loop
+              # retry if it was not successful
+              archive_collection.insert_one(desired_state)
+              break
+            elif i == 4:
+              print("Failed to update the correct document, exiting")
+              raise PyMongoError("Failed to update the correct document, exiting")
+        except OperationFailure as e:
+          print(e.details)
+          logging.error(e.details)
+        except TypeError as e:
+          print(e)
 
 if __name__ == "__main__": main()
