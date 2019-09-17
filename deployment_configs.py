@@ -25,6 +25,7 @@ except ImportError as e:
 LOG_FILE = sys.path[0] + '/deployment_configs.log'
 CONF_FILE = sys.path[0] + '/deployment_configs.conf'
 waiver_processes = {"processes": {"version": "WAIVER"}}
+ROLE_SEARCH_TERMS = []
 
 # Get config setting from `event_watcher.config` file
 if os.path.isfile(CONF_FILE) == False:
@@ -49,6 +50,7 @@ try:
   OPS_MANAGER_TIMEOUT = config.getint('ops_manager','timeout', fallback=10)
   AUDIT_DB_TIMEOUT = config.getint('audit_db','timeout', fallback=10)
   EXCLUDED_ROOT_KEYS = config.get('general','excluded_root_keys',fallback=[]).split(',')
+  ROLE_SEARCH_TERMS = config.get('general','role_search_terms',fallback='schema').replace(',', '|')
 except configparser.NoOptionError as e:
   logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
   logging.error('The config file must include the `BASEURL` option in the `audit_db` section')
@@ -94,6 +96,7 @@ if DEBUG == True:
   logging.debug("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', AUDIT_DB_CONNECTION_STRING))
   logging.debug("OPS MANAGER CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',BASEURL))
   logging.debug("EXCLUDED KEYS: %s" % EXCLUDED_ROOT_KEYS)
+  logging.debug("ROLE SEARCH TERMS: %s" % ROLE_SEARCH_TERMS)
   print("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', AUDIT_DB_CONNECTION_STRING))
   print("OPS MANAGER CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',BASEURL))
 else:
@@ -256,17 +259,114 @@ def get_users(hostname, port, replica_set, auth_method='GSSAPI', auth_source="$e
     local_db = local['admin']
     user_collection = local_db['system.users']
     #if serverVersion < tuple("4.0.0".split(".")):
-    users = user_collection.aggregate([{"$project": {"list": {"$objectToArray": "$credentials"}}},{"$project": {'mech': "$list.k"}}])
+    user_pipeline = [
+      {
+        "$match": {
+          "$or": [
+            { 
+              "db": {
+                "$ne": "$external"
+              }
+            },
+            {
+              "$and": [
+                {
+                  "$or": [
+                    {
+                      "roles.role": "root"
+                    },
+                    {
+                      "roles.role": re.compile(ROLE_SEARCH_TERMS)
+                    }
+                  ]
+                },
+                {
+                  "user": {
+                    "$not": re.compile('admin@')
+                  }
+                }
+              ]
+            }
+
+            ]
+        }
+      },
+      {
+        "$project": {
+          "list": {
+            "$objectToArray": "$credentials"
+          },
+          "roles": 1,
+          "db": 1,
+          "user": 1,
+          "_id": 0
+        }
+      },
+      {
+        "$project": {
+          "mech": "$list.k",
+          "roles": 1,
+          "db": 1,
+          "user": 1
+        }
+      }
+]
+    users = user_collection.aggregate(user_pipeline)
     for user in users:
-      user_list.append(user['_id'] + ": " + dumps(user['mech']))
-    #else:
-    # This fails because of strange permissions issues
-    #  users = local_db.command("usersInfo", forAllDBs=True)
+      user_list.append(user)
     return user_list
-  except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure, pymongo.errors.ConfigurationError, pymongo.errors.OperationFailure) as e:
-    logging.error("Cannot connect to deployment DB: %s" %e)
-    print("Cannot connect to deployment DB: %s" %e)
-    return "Could not connect for %s" % hostname
+  except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure) as e:
+    logging.error("Cannot connect to deployment %s: %s" % (replica_set,e))
+    if DEBUG:
+      print("Cannot connect to deployment %s: %s" % (replica_set, e))
+    return ["Cannot connect to deployment %s on %s, connection failure" % (replica_set, hostname)]
+  except (pymongo.errors.ConfigurationError, pymongo.errors.OperationFailure) as e:
+    logging.error("Cannot execute on deployment %s: %s" % (replica_set,e))
+    if DEBUG:
+      print("Cannot execute on deployment %s: %s" % (replica_set,e))
+    return ["Cannot execute on deployment %s on %s. This maybe a permissions issue" % (replica_set, hostname)]
+
+def get_cluster_users(deployment_id):
+  user_list = []
+  cluster_list = get('/groups/' + deployment_id + '/clusters')
+  for cluster in cluster_list['results']:
+    host_list = get('/groups/' + deployment_id + '/hosts/?clusterId=' + cluster['id'])
+    for host in host_list['results']:
+      deployment_users = {}
+      if host['typeName'] == 'REPLICA_PRIMARY' or host['typeName'] == 'SHARD_MONGOS':
+        deployment_users = get_users(host['hostname'], host['port'], host['replicaSetName'])
+        user_list.extend(copy.deepcopy(deployment_users))
+        break
+  return user_list
+
+def check_user_waiver(user_dict, waiver_list):
+  failure_data = {"issue": [], "waiver": []}
+  if type(user_dict) is list and type(waiver_list) is list:
+    for entry in user_dict:
+      if type(entry) is dict:
+        if 'user' in entry and entry['user'] in waiver_list:
+          failure_data['waiver'].append(entry['user'] + " has a waiver for local login with:" + dumps(entry['mech']) + ' on ' + entry['db'])
+        else:
+          failure_data['issue'].append(entry['user'] + " has a local login with:" + dumps(entry['mech']) + "on " + entry['db'])
+  return failure_data
+
+def check_admin_waiver(admin_dict, waiver_list):
+  failure_data = {"issue": [], "waiver": []}
+  schema_pattern = re.compile(ROLE_SEARCH_TERMS)
+  if type(admin_dict) is list and type(waiver_list) is list:
+    for entry in admin_dict:
+      if type(entry) is dict:
+        if 'user' in entry and 'roles' in entry and type(entry['roles']) is list:
+          for role in entry['roles']:
+            if role['role'] == 'root' or schema_pattern.search(role['role']): 
+              if entry['user'] in waiver_list:
+                failure_data['waiver'].append(entry['user'] + " has a waiver for Admin access with:" + dumps(entry['roles']) + ' on ' + entry['db'])
+              else:
+                failure_data['issue'].append(entry['user'] + ' has Admin access with ' + dumps(entry['roles']) + ' on ' + entry['db'])
+              break
+      else:
+        failure_data['issue'].append(entry)
+  return failure_data
 
 def main():
   STANDARDS = get_standards()
@@ -275,22 +375,31 @@ def main():
   DEPLOYMENTS = get('/groups')
   for deployment in DEPLOYMENTS['results']:
     if deployment['hostCounts']['mongos'] > 0 or deployment['hostCounts']['primary'] > 0:
-      compliance = []
-      host_list = get('/groups/' + deployment['id'] + '/hosts')
-      for host in host_list['results']:
-        if host['typeName'] == 'REPLICA_PRIMARY':
-          print(host['hostname'])
-          deployment_users = get_users(host['hostname'], host['port'], host['replicaSetName'])
-          print("USERS: %s " % deployment_users)
+      # Get group from Ops Manager
       desired_state = get('/groups/' + deployment['id'] + '/automationConfig')
+      desired_state['compliance'] = []
+      compliance = []
+
       # determine if a waiver exists for this deployment
       waiver_details = get_waiver(deployment['name'] + " - (ORG: " + deployment['orgId'] + ")")
       if DEBUG:
         print("DEPLOYMENT NAME: %s" % deployment['name'])
         print("WAIVER: %s" % waiver_details)
-      desired_state['compliance'] = []
+
       # Only check for compliance if there is a standard to check against
       if STANDARDS:
+        # check the users in a deployment locally at the deployment
+        users = get_cluster_users(deployment['id'])
+        if 'local_users' not in waiver_details:
+          waiver_details['local_users'] = []
+        user_details = check_user_waiver(users, waiver_details['local_users'])
+        if 'admin_users' not in waiver_details:
+          waiver_details['admin_users'] = []
+        admin_details = check_admin_waiver(users, waiver_details['admin_users'])
+        user_details['host'] = 'Users'
+        user_details['issue'].extend(admin_details['issue'])
+        user_details['waiver'].extend(admin_details['waiver'])
+        desired_state['compliance'].append(copy.deepcopy(user_details))
         if 'project' not in waiver_details:
           waiver_details['project'] = {}
         deployment_compliance = check_dict('', STANDARDS['project'], desired_state, waiver_details['project'])

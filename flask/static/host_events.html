@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+  <head>
+    <title>Reports</title>
+    <link rel="stylesheet" href='../static/style.css'/>
+    <meta charset="utf-8" />
+  </head>
+  <body>
+    <h1>CCA Report for {{host}}</h1>
+      <p>Between {{low_date}} and {{high_date}}</p>
+      <table>
+        <th>Timestamp</th>
+        <th>User</th>
+        <th>Type</th>
+        <th>Source</th>
+        <th>Events</th>
+        <th>Hosts</th>
+      {% for event in events %}
+      <tr>
+        <td><a href="./host_event_details/{{event['_id']}}" target="_blank"><script>document.write(new Date("{{event['ts']}}"));</script></a></td>
+        <td>{{event['User']}}</td>
+        <td>{{event['Type']}}</td>
+        <td>{{event['source']}}</td>
+        <td><pre>{{event['Events']}}</pre></td>
+        <td>{{event['Hosts']}}</td>
+      </tr>
+      {% endfor %}
+      </table>
+      <br>
+  </body>
+</html>

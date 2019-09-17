@@ -1,0 +1,42 @@
+body{
+  background: #007DBA;
+  color: white;
+  padding:1%;
+  font: bold 12px Arial;
+  text-decoration: none;
+}
+a{
+color: white
+}
+table {
+border-collapse: collapse;
+}
+table, th, td {
+border: 1px solid white;
+table-layout: fixed;
+width 100%;
+}
+th, td {
+padding: 10px;
+text-align: left;
+vertical-align: top;
+word-break: break-all;
+}
+#evil{
+color: yellow
+}
+.diff {
+width: 400px;
+}
+.data {
+width: 1000px;
+word-wrap: break-word;
+}
+.wrapper {
+overflow-x: auto;
+white-space: pre-wrap;
+white-space: -moz-pre-wrap;
+white-space: -pre-wrap;
+white-space: -o-pre-wrap;
+word-wrap: break-word;
+}

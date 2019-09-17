@@ -1,5 +1,5 @@
 try:
-  from flask import Flask, render_template, request, current_app, redirect, url_for
+  from flask import Flask, render_template, request
   import configparser
   import json
   import time
@@ -379,8 +379,6 @@ def get_deployment():
 @app.route("/deployment_event_details", methods=['GET'])
 def get_deployment_event_details():
   try:
-    print("OID: %s" % request.args['oid'])
-    print("type: %s" % request.args['search_type'])
     if request.args['search_type'] == 'latest':
       coll = config_collection
     else:
@@ -474,29 +472,32 @@ def deployment_waiver():
   except OperationFailure as e:
     print(e.details)
 
-@app.route("/update_waiver/<deployment>")
-def update_waiver(deployment):
+@app.route("/update_waiver", methods=['POST'])
+def update_waiver():
   try:
-    end_date = datetime.datetime.strptime(request.args['end'], "%a, %d %b %Y %H:%M:%S %Z")
-    start_date = datetime.datetime.strptime(request.args['start'], "%a, %d %b %Y %H:%M:%S %Z")
+    deployment = request.form['deployment']
+    end_date = datetime.datetime.strptime(request.form['end'], "%a, %d %b %Y %H:%M:%S %Z")
+    start_date = datetime.datetime.strptime(request.form['start'], "%a, %d %b %Y %H:%M:%S %Z")
     auth = []
-    if 'GSSAPI' in request.args:
+    if 'GSSAPI' in request.form:
       auth.append('GSSAPI')
-    if 'SCRAM-SHA-1' in request.args:
+    if 'SCRAM-SHA-1' in request.form:
       auth.append('MONGODB-CR')
-    if 'SCRAM-SHA-256' in request.args:
+    if 'SCRAM-SHA-256' in request.form:
       auth.append('SCRAM-SHA-256')
-    if 'LDAP' in request.args:
+    if 'LDAP' in request.form:
       auth.append('PLAIN')
-    update_details = {"deployment": deployment,"valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(),"comments": request.args['comments']}
-    new_waiver = {"deployment": deployment, "valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now()}
-    if 'version' in request.args:
+    local_users = request.form['local_users'].split()
+    admin_users = request.form['admin_users'].split()
+    update_details = {"deployment": deployment,"valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(),"comments": request.form['comments'], "local_users": local_users, "admin_users": admin_users}
+    new_waiver = {"deployment": deployment, "valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(), "local_users": local_users, "admin_users": admin_users}
+    if 'version' in request.form:
       if 'processes' not in update_details:
         update_details['processes'] = {}
       if 'processes' not in new_waiver:
         new_waiver['processes'] = {}
-      update_details['processes']['version'] = request.args['version']
-      new_waiver['processes']['version'] = request.args['version']
+      update_details['processes']['version'] = request.form['version']
+      new_waiver['processes']['version'] = request.form['version']
     update_details['schema_version'] = 0
     new_waiver['schema_version'] = 0
     # Index {"deployment": 1} on `logging.waivers`
