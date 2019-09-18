@@ -13,6 +13,7 @@ try:
   import sys
   import datetime
   import re
+  from pprint import pprint
   from bson.json_util import dumps
   from pymongo.errors import OperationFailure,PyMongoError
   if sys.version_info[0] >= 3:
@@ -26,6 +27,39 @@ LOG_FILE = sys.path[0] + '/deployment_configs.log'
 CONF_FILE = sys.path[0] + '/deployment_configs.conf'
 waiver_processes = {"processes": {"version": "WAIVER"}}
 ROLE_SEARCH_TERMS = []
+
+def config_err_mesg(msg):
+  err_msg = """\033[91mERROR! """ + str(msg) + """. The config file should look similar to (leave out SSL if not required):
+    \033[92m
+    [ops_manager]
+    baseurl=https://host:port/api/public/v1.0
+    username=loud.sam
+    token=8ce50f02-4292-460e-82a5-000a0742182a
+    ssl_ca_cert_path=/data/pki/ca.cert
+    ssl_pem_path=/data/pki/mongod6.mongodb.local.pem
+
+    [audit_db]
+    connection_string=mongodb://auditwriter%%40MONGODB.LOCAL@mongod6.mongodb.local:27017/?replicaSet=repl0&authSource=$external&authMechanism=GSSAPI
+    timeout=1000
+    ssl_enabled=True
+    ssl_ca_cert_path=/data/pki/ca.cert
+    ssl_pem_path=/data/pki/mongod6.mongodb.local.pem
+
+    [general]
+    debug=false
+    excluded_root_keys=mongoDbVersions,mongosqlds,backupVersions,agentVersion,monitoringVersions,uiBaseUrl,cpsModules,mongots,indexConfigs
+    role_search_terms=Admin,schema
+
+    [deployments]
+    db_credentials=auditwriter%%40MONGODB.LOCAL
+    non_om_deployments=mongod10.mongodb.local:27017/?replicaSet=appdb,mongod10.mongodb.local:27018/?replicaSet=oplogdb
+    ssl_enabled=True
+    ssl_ca_cert_path=/data/pki/ca.cert
+    ssl_pem_path=/data/pki/mongod6.mongodb.local.pem
+    auth_source=$external
+    auth_method=GSSAPI
+    \033[m"""
+  return err_msg
 
 # Get config setting from `event_watcher.config` file
 if os.path.isfile(CONF_FILE) == False:
@@ -49,45 +83,22 @@ try:
     AUDIT_DB_SSL_CA = config.get('audit_db', 'ssl_ca_cert_path')
   OPS_MANAGER_TIMEOUT = config.getint('ops_manager','timeout', fallback=10)
   AUDIT_DB_TIMEOUT = config.getint('audit_db','timeout', fallback=10)
-  EXCLUDED_ROOT_KEYS = config.get('general','excluded_root_keys',fallback=[]).split(',')
+  EXCLUDED_ROOT_KEYS = config.get('general','excluded_root_keys',fallback=None)
   ROLE_SEARCH_TERMS = config.get('general','role_search_terms',fallback='schema').replace(',', '|')
-except configparser.NoOptionError as e:
+  NON_OM_DEPLOYMENTS = config.get('deployments','non_om_deployments',fallback=None)
+  DB_CREDENTIALS = config.get('deployments','db_credentials',fallback=None)
+  AUTH_SOURCE = config.get('deployments','auth_source',fallback='$external')
+  AUTH_METHOD = config.get('deployments','auth_method',fallback='GSSAPI')
+  DEPLOY_DB_SSL = config.getboolean('deployments','ssl_enabled',fallback=False)
+  if DEPLOY_DB_SSL is True:
+    DEPLOY_DB_SSL_PEM = config.get('deployments','ssl_pem_path')
+    DEPLOY_DB_SSL_CA = config.get('deployments', 'ssl_ca_cert_path')
+  DEPLOY_DB_TIMEOUT = config.getint('deployments','timeout', fallback=10)
+except (configparser.NoOptionError,configparser.NoSectionError) as e:
   logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
-  logging.error('The config file must include the `BASEURL` option in the `audit_db` section')
-  print('\033[91m' + "ERROR! The config file must include the `BASEURL` option in both the `ops_manager` and `audit_db` sections "
-    ", such as:\n"
-    + '\033[92m'
-    "[ops_manager]\n"
-    "baseurl=https://host:port/api/public/v1.0\n"
-    "username=loud.sam\n"
-    "token=8ce50f02-4292-460e-82a5-000a0742182a\n\n"
-    "[audit_db]"
-    "connection_string=mongodb://username:password@host:port/?replicaSet=replicasetname\n"
-    "ssl_enabled=True\n"
-    "ssl_pem_path=/data/pki/mongod3.mongodb.local.pem\n"
-    "ssl_ca_cert_path=/data/pki/ca.cert\n"
-    + '\033[m')
+  logging.error(e)
+  print(config_err_mesg(e))
   sys.exit(1)
-except configparser.NoSectionError as e:
-  logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
-  logging.error('The config file must include sections `audit_db` and `general`')
-  print('\033[91m' + "ERROR! The config file must include sections `ops_manager`, `audit_db` and `general`, such as:\n"
-    + '\033[92m'
-    "[ops_manager]\n"
-    "baseurl=https://host:port/api/public/v1.0\n"
-    "timeout=1000\n"
-    "username=loud.sam\n"
-    "token=8ce50f02-4292-460e-82a5-000a0742182a\n\n"
-    "[audit_db]\n"
-    "connection_string=mongodb://username:password@host:port/?replicaSet=replicasetname\n"
-    "ssl_enabled=True\n"
-    "ssl_pem_path=/data/pki/mongod3.mongodb.local.pem\n"
-    "ssl_ca_cert_path=/data/pki/ca.cert\n"
-    "timeout=1000\n\n"
-    "[general]\n"
-    "debug=False"
-    + '\033[m'
-    )
   sys.exit(1)
 
 if DEBUG == True:
@@ -97,6 +108,7 @@ if DEBUG == True:
   logging.debug("OPS MANAGER CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',BASEURL))
   logging.debug("EXCLUDED KEYS: %s" % EXCLUDED_ROOT_KEYS)
   logging.debug("ROLE SEARCH TERMS: %s" % ROLE_SEARCH_TERMS)
+  logging.debug("NON OM DEPLOYMETNS: %s" % NON_OM_DEPLOYMENTS)
   print("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', AUDIT_DB_CONNECTION_STRING))
   print("OPS MANAGER CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',BASEURL))
 else:
@@ -250,11 +262,20 @@ def check_list(k, s_array, d_array, waivers):
         break
   return failure_data
 
-def get_users(hostname, port, replica_set, auth_method='GSSAPI', auth_source="$external", debug=False):
+def get_users(hostname, port, replica_set):
   try:
     user_list = []
-    local_connection_string = "mongodb://auditwriter%40MONGODB.LOCAL@" + hostname + ":" + str(port) + "/?replicaSet=" + replica_set + "&authSource=" + auth_source + "&authMechanism=" + auth_method
-    local = pymongo.MongoClient(local_connection_string, serverSelectionTimeoutMS=AUDIT_DB_TIMEOUT, ssl=True, ssl_certfile=AUDIT_DB_SSL_PEM, ssl_ca_certs=AUDIT_DB_SSL_CA)
+    local_connection_string = "mongodb://" + DB_CREDENTIALS + "@" + hostname + ":" + str(port) + "/?replicaSet=" + replica_set + "&authSource=" + AUTH_SOURCE + "&authMechanism=" + AUTH_METHOD
+    if DEPLOY_DB_SSL is True:
+      if DEBUG is True:
+        logging.debug("Using SSL/TLS to %s:%s" % (hostname,str(port)))
+        print("Using SSL/TLS to %s:%s" % (hostname,str(port)))
+      local = pymongo.MongoClient(local_connection_string, serverSelectionTimeoutMS=DEPLOY_DB_TIMEOUT, ssl=True, ssl_certfile=DEPLOY_DB_SSL_PEM, ssl_ca_certs=DEPLOY_DB_SSL_CA)
+    else:
+      if DEBUG is True:
+        logging.debug("Not ussing SSL/TLS to %s:%s" % (hostname,str(port)))
+        print("Not using SSL/TLS to %s:%s" % (hostname,str(port)))
+      local = pymongo.MongoClient(local_connection_string, serverSelectionTimeoutMS=DEPLOY_DB_TIMEOUT)
     #serverVersion = tuple(local.server_info()['version'].split('.'))
     local_db = local['admin']
     user_collection = local_db['system.users']
@@ -312,6 +333,7 @@ def get_users(hostname, port, replica_set, auth_method='GSSAPI', auth_source="$e
       }
 ]
     users = user_collection.aggregate(user_pipeline)
+    local.close()
     for user in users:
       user_list.append(user)
     return user_list
@@ -368,15 +390,106 @@ def check_admin_waiver(admin_dict, waiver_list):
         failure_data['issue'].append(entry)
   return failure_data
 
+def get_non_om_deployments():
+  deployments = []
+  for deployment in NON_OM_DEPLOYMENTS.split(','):
+    try:
+      local_connection_string = "mongodb://" + deployment
+      if DEPLOY_DB_SSL is True:
+        if DEBUG is True:
+          logging.debug("Using SSL/TLS to %s:%s" % deployment)
+          print("Using SSL/TLS to %s:%s" % deployment)
+        local = pymongo.MongoClient(local_connection_string, serverSelectionTimeoutMS=DEPLOY_DB_TIMEOUT, ssl=True, ssl_certfile=DEPLOY_DB_SSL_PEM, ssl_ca_certs=DEPLOY_DB_SSL_CA)
+      else:
+        if DEBUG is True:
+          logging.debug("Not ussing SSL/TLS to %s" % deployment)
+          print("Not using SSL/TLS to %s" % deployment)
+        local = pymongo.MongoClient(local_connection_string, serverSelectionTimeoutMS=DEPLOY_DB_TIMEOUT)
+      # we could use `local.nodes`, but this gives us more details
+      deployment_details = local.admin.command('isMaster')
+      deployments.append(
+        { 
+          'hosts': deployment_details['hosts'],
+          'setName': deployment_details['setName'],
+          'hostCounts': {
+            'mongos': 0,
+            'primary': len(local.primary),
+            'secondaries': len(local.secondaries) - 1
+          },
+          'name': deployment_details['setName'],
+          'orgId': 'Non Ops Manager Managed Environment'
+        }
+      )
+      local.close()
+    except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure) as e:
+      logging.error("Cannot connect to deployment %s: %s" % (deployment, e))
+      if DEBUG:
+        print("Cannot connect to deployment %s: %s" % (deployment, e))
+      return None
+    except (pymongo.errors.ConfigurationError, pymongo.errors.OperationFailure) as e:
+      logging.error("Cannot execute on deployment %s: %s" % (deployment, e))
+      if DEBUG:
+        print("Cannot execute on deployment %s: %s" % (deployment, e))
+      return None
+  return deployments
+
+
+# We need to retrieve the config from the non-Ops Manager managed instances and format the data like the Ops Manager managed instances for processes
+def get_deployment_configs(deployment_dict):
+  deployments_args = {'processes': [], 'ts': datetime.datetime.now()}
+  deployments_args.update(copy.deepcopy(deployment_dict))
+  try:
+    for instance in deployment_dict['hosts']:
+      local_connection_string = "mongodb://" + DB_CREDENTIALS + '@' + instance + '/?replicaSet=' + deployment_dict['setName'] + "&authSource=" + AUTH_SOURCE + "&authMechanism=" + AUTH_METHOD
+      if DEPLOY_DB_SSL is True:
+        if DEBUG is True:
+          logging.debug("Using SSL/TLS to %s:%s" % instance)
+          print("Using SSL/TLS to %s:%s" % instance)
+        local = pymongo.MongoClient(local_connection_string, serverSelectionTimeoutMS=DEPLOY_DB_TIMEOUT, ssl=True, ssl_certfile=DEPLOY_DB_SSL_PEM, ssl_ca_certs=DEPLOY_DB_SSL_CA)
+      else:
+        if DEBUG is True:
+          logging.debug("Not ussing SSL/TLS to %s" % instance)
+          print("Not using SSL/TLS to %s" % instance)
+        local = pymongo.MongoClient(local_connection_string, serverSelectionTimeoutMS=DEPLOY_DB_TIMEOUT)
+      deployment_details = local.admin.command({ 'getCmdLineOpts': 1  })
+      deployments_args['processes'].append({'args2_6': deployment_details['parsed'], 'hostname': instance.split(':')[0]})
+      local.close()
+  except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure) as e:
+    logging.error("Cannot connect to deployment %s: %s" % (instance, e))
+    if DEBUG:
+      print("Cannot connect to deployment %s: %s" % (instance, e))
+    return None
+  except (pymongo.errors.ConfigurationError, pymongo.errors.OperationFailure) as e:
+    logging.error("Cannot execute on deployment %s: %s" % (instance, e))
+    if DEBUG:
+      print("Cannot execute on deployment %s: %s" % (instance, e))
+    return None
+  return deployments_args
+
 def main():
   STANDARDS = get_standards()
   if DEBUG:
     print(STANDARDS)
+  
+  # Get all the deployments from Ops Manager
   DEPLOYMENTS = get('/groups')
+  if DB_CREDENTIALS and NON_OM_DEPLOYMENTS:
+    deploys = get_non_om_deployments()
+    if type(deploys) is dict:
+      DEPLOYMENTS['results'].extend()
+
   for deployment in DEPLOYMENTS['results']:
-    if deployment['hostCounts']['mongos'] > 0 or deployment['hostCounts']['primary'] > 0:
-      # Get group from Ops Manager
-      desired_state = get('/groups/' + deployment['id'] + '/automationConfig')
+    if 'hostCounts' in deployment and (deployment['hostCounts']['mongos'] > 0 or deployment['hostCounts']['primary'] > 0):
+      # Get group from Ops Manager, if this deployment belongs to Ops Manager
+      # otherwise we get the previous data
+      if 'id' in deployment:
+        desired_state = get('/groups/' + deployment['id'] + '/automationConfig')
+        desired_state['source'] = 'OPS MANAGER'
+      else:
+        desired_state = copy.deepcopy(get_deployment_configs(deployment))
+        if desired_state is None:
+          continue
+        desired_state['source'] = 'INSTANCE'
       desired_state['compliance'] = []
       compliance = []
 
@@ -387,9 +500,14 @@ def main():
         print("WAIVER: %s" % waiver_details)
 
       # Only check for compliance if there is a standard to check against
-      if STANDARDS:
+      if STANDARDS and DB_CREDENTIALS:
         # check the users in a deployment locally at the deployment
-        users = get_cluster_users(deployment['id'])
+        if 'id' in deployment:
+          # For Ops Manager controlled
+          users = get_cluster_users(deployment['id'])
+        else:
+          # For non-Ops Manager deployments
+          users = get_users(desired_state['processes'][0]['hostname'],desired_state['processes'][0]['args2_6']['net']['port'],desired_state['processes'][0]['args2_6']['replication']['replSetName'])
         if 'local_users' not in waiver_details:
           waiver_details['local_users'] = []
         user_details = check_user_waiver(users, waiver_details['local_users'])
@@ -406,7 +524,8 @@ def main():
         deployment_compliance['host'] = 'Project Level'
         # Deep copy because Python does copy by reference
         desired_state['compliance'].append(copy.deepcopy(deployment_compliance))
-      # Determine if project has any members
+      
+      # Determine if project has any instances
       if desired_state['processes']:
         for instance in desired_state['processes']:
           # Only check for compliance if there is a standard to check against
@@ -422,24 +541,28 @@ def main():
               # Deep copy because Python does copy by reference
               desired_state['compliance'].append(copy.deepcopy(compliance))
         desired_state['deployment'] = deployment['name'] + " - (ORG: " + deployment['orgId'] + ")"
-        for remove_key in EXCLUDED_ROOT_KEYS:
-          if remove_key in desired_state:
-            desired_state.pop(remove_key)
-            if DEBUG:
-              print("Removed Key: %s" % remove_key)
-        if 'key' in desired_state['auth']:
-          desired_state['auth']['key'] = '<REDACTED>'
-        if 'autoPwd' in desired_state['auth']:
-          desired_state['auth']['autoPwd'] = '<REDACTED>'
-        if 'ldap' in desired_state and 'bindQueryPassword' in desired_state['ldap']:
-          desired_state['ldap']['bindQueryPassword'] = '<REDACTED>'
-        for user in desired_state['auth']['usersWanted']:
-          if 'pwd' in user:
-            user['pwd'] = '<REDACTED>'
-          if 'scramSha1Creds' in user:
-            user['scramSha1Creds'] = '<REDACTED>'
-          if 'scramSha256Creds' in user:
-            user['scramSha256Creds'] = '<REDACTED>'
+
+        # Remove or redact data that is sensitive
+        if EXCLUDED_ROOT_KEYS:
+          for remove_key in EXCLUDED_ROOT_KEYS.split(','):
+            if remove_key in desired_state:
+              desired_state.pop(remove_key)
+              if DEBUG:
+                print("Removed Key: %s" % remove_key)
+        if 'auth' in desired_state:
+          if 'key' in desired_state['auth']:
+            desired_state['auth']['key'] = '<REDACTED>'
+          if 'autoPwd' in desired_state['auth']:
+            desired_state['auth']['autoPwd'] = '<REDACTED>'
+          if 'ldap' in desired_state and 'bindQueryPassword' in desired_state['ldap']:
+            desired_state['ldap']['bindQueryPassword'] = '<REDACTED>'
+          for user in desired_state['auth']['usersWanted']:
+            if 'pwd' in user:
+              user['pwd'] = '<REDACTED>'
+            if 'scramSha1Creds' in user:
+              user['scramSha1Creds'] = '<REDACTED>'
+            if 'scramSha256Creds' in user:
+              user['scramSha256Creds'] = '<REDACTED>'
 
         # write results to audit db
         desired_state['ts'] = datetime.datetime.now()

@@ -60,7 +60,9 @@ NOTE that URL encoded special characters require double `%`, e.g `@` would be `%
 
 Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 10 seconds and `false` respectivetly). SSL/TLS settings are optional, but if `ssl_enabled` is `True` then `ssl_pem_path` and `ssl_ca_cert_path` must exist.
 
-The `elevated_app_events`, `elevated_config_events` `elevated_ops_events` are comma separated lists of events that will be either tagged as `APP EVENT`, `CONFIG EVENT` or `OPS EVENT` respectively for easy querying in the audit database. The `audit_log` option, which is optional, is the path, including file name, to the MongoDB instance audit log, the default is `audit.log` in the directory where the script resides.
+The `elevated_app_events`, `elevated_config_events` `elevated_ops_events` are comma separated lists of events that will be either tagged as `APP EVENT`, `CONFIG EVENT` or `OPS EVENT` respectively for easy querying in the audit database. The list of events are available in the [MongoDB documentation](https://docs.mongodb.com/manual/reference/audit-message/#audit-event-actions-details-and-results).
+
+The `audit_log` option, which is optional, is the path, including file name, to the MongoDB instance audit log, the default is `audit.log` in the directory where the script resides.
 
 ## config_watcher
 
@@ -200,6 +202,15 @@ ssl_ca_cert_path=<PATH_TO_CA_CERT>
 debug=<BOOLEAN_VALUE>
 exclude_root_keys=<COMMA_SEPARATED_LIST>
 role_search_term=<COMMA_SEPARATED_LIST>
+
+[deployments]
+db_credentials=auditwriter%%40MONGODB.LOCAL
+non_om_deployments=mongod10.mongodb.local:27017/?replicaSet=appdb,mongod10.mongodb.local:27018/?replicaSet=oplogdb
+ssl_enabled=True
+ssl_ca_cert_path=/data/pki/ca.cert
+ssl_pem_path=/data/pki/mongod6.mongodb.local.pem
+auth_source=$external
+auth_method=GSSAPI
 ```
 
 Example:
@@ -224,6 +235,15 @@ ssl_pem_path=/data/pki/auditor.mongodb.local.pem
 debug=false
 excluded_root_keys=mongoDbVersions,mongosqlds,backupVersions,agentVersion,monitoringVersions,uiBaseUrl,cpsModules,mongots,indexConfigs
 role_search_terms=Admin,schema
+
+[deployments]
+db_credentials=auditwriter%%40MONGODB.LOCAL
+non_om_deployments=mongod10.mongodb.local:27017/?replicaSet=appdb,mongod10.mongodb.local:27018/?replicaSet=oplogdb
+ssl_enabled=True
+ssl_ca_cert_path=/data/pki/ca.cert
+ssl_pem_path=/data/pki/mongod6.mongodb.local.pem
+auth_source=$external
+auth_method=GSSAPI
 ```
 
 NOTE that URL encoded special characters require double `%`, e.g `@` would be `%%40`.
@@ -269,6 +289,8 @@ ssl_pem_path=/data/pki/mongod6.mongodb.local.pem
 [general]
 debug=false
 ```
+
+The application listens on port 8000 via HTTP, the script can be modified manually to change port and use HTTPS if desired.
 
 The Flask application can be run standalone for via a setup with a web server and WSGI.
 
