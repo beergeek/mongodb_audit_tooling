@@ -8,7 +8,7 @@ The following tools are in this repository:
 * config_watcher (to retrieve configuration changes to Ops Manager and forward to a MongoDB audit database)
 * event_watcher (to retrieve audit events from Ops Manager and forward to a MongoDB audit database)
 * deployment_configs (to retrieve all the deployment configurations from Ops Manager)
-* repoter (basic Flask app to query and display various reports and admin tasks)
+* reporter (basic Flask app to query and display various reports and admin tasks)
 
 # Details
 
