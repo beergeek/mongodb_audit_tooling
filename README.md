@@ -64,6 +64,46 @@ The `elevated_app_events`, `elevated_config_events` `elevated_ops_events` are co
 
 The `audit_log` option, which is optional, is the path, including file name, to the MongoDB instance audit log, the default is `audit.log` in the directory where the script resides.
 
+### Setup
+
+This script resides on each server of the deployment.
+
+The following non-standard Python modules are required (and dependancies):
+
+* [pymongo](https://pypi.org/project/pymongo/)
+* [kerberos](https://pypi.org/project/kerberos/)
+* [configparser](https://pypi.org/project/configparser/)
+
+The mongod config file should have something similar to the following for auditing:
+
+```JSON
+auditLog:
+  destination: file
+  filter: "{$or: [{'param.command': {$nin: ['_isSelf','appendOplogNote','buildInfo','getMore','isMaster','ismaster','ping','replSetGetStatus','saslContinue','saslStart']},$or: [{'users.user': {$nin: ['__system','mms-backup-agent','mms-monitoring-agent','mms-automation']},'roles.role': {$in: ['root',/Admin/]}}]},{'users.user': 'mms-automation','param.command': {$nin: ['_isSelf','appendOplogNote','buildInfo','getMore','isMaster','ismaster','ping','replSetGetStatus','saslContinue','saslStart','listIndexes','getLog','serverStatus','collstats','listCollections','killCursors','getCmdLineOpts','hostInfo','getParameter','connPoolStats','find','dbstats','listDatabases']}},{'atype': {$in: ['addShard','createCollection','createDatabase','createIndex','createRole','createUser','dropAllRolesFromDatabase','dropAllUsersFromDatabase','dropCollection','dropDatabase','dropIndex','dropRole','dropUser','enableSharding','grantPrivilegesToRole','grantRolesToRole','grantRolesToUser','removeShard','renameCollection','replSetReconfig','revokePrivilegesFromRole','revokeRolesFromRole','revokeRolesFromUser','shardCollection','shutdown','updateRole','updateUser']}}]}"
+  format: JSON
+  path: /data/logs/audit.log
+setParameter:
+  auditAuthorizationSuccess: "true"
+```
+
+The script and config file must be located in the same directory. A systemD service file can be created to run these scripts automatically on start:
+
+```shell
+[Unit]
+Description=Watcher Script for MongoDB Auditing
+After=network.target
+
+[Service]
+User=mongod
+Group=mongod
+Environment="KRB5_CLIENT_KTNAME=/data/pki/audit.keytab"
+ExecStart=/bin/python /data/logs/log_processor.py
+Type=simple
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ## config_watcher
 
 This script retrieve Ops Manager configuration modifications from the Ops Manager application database via a change stream on the `cloudconf.config.appState` database/collection. The events are formatted and inserted into a MongoDB 'audit' database.
@@ -117,6 +157,34 @@ NOTE that URL encoded special characters require double `%`, e.g `@` would be `%
 An example that is similar to this script can be found in the section below.
 
 Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 10 seconds and `false` respectivetly). The optional `event_pipeline` is a change stream pipeline to filter events. SSL/TLS settings for both databases are optional, but if `ssl_enabled` is `True` then `ssl_pem_path` and `ssl_ca_cert_path` must exist. SSL/TLS default is `False`.
+
+### Setup
+
+This script should reside on a single server, most likely one of the Audit DB nodes.
+
+The following non-standard Python modules are required (and dependancies):
+
+* [pymongo](https://pypi.org/project/pymongo/)
+* [kerberos](https://pypi.org/project/kerberos/)
+* [configparser](https://pypi.org/project/configparser/)
+
+The script and config file must be located in the same directory. A systemD service file can be created to run these scripts automatically on start:
+
+```shell
+[Unit]
+Description=Watcher Script for MongoDB Auditing
+After=network.target
+
+[Service]
+User=mongod
+Group=mongod
+Environment="KRB5_CLIENT_KTNAME=/data/pki/audit.keytab"
+ExecStart=/bin/python /data/scripts/config_watcher.py
+Type=simple
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ## event_watcher
 
@@ -173,6 +241,34 @@ NOTE that URL encoded special characters require double `%`, e.g `@` would be `%
 An example that is similar to this script can be found in the section below.
 
 Both sections are mandatory, as well as the `connection_string` option, but the `timeout` and `debug` are option (having defaults of 10 seconds and `false` respectivetly). The optional `event_pipeline` is a change stream pipeline to filter events. SSL/TLS settings for both databases are optional, but if `ssl_enabled` is `True` then `ssl_pem_path` and `ssl_ca_cert_path` must exist. SSL/TLS default is `False`.
+
+### Setup
+
+This script should reside on a single server, most likely one of the Audit DB nodes.
+
+The following non-standard Python modules are required (and dependancies):
+
+* [pymongo](https://pypi.org/project/pymongo/)
+* [kerberos](https://pypi.org/project/kerberos/)
+* [configparser](https://pypi.org/project/configparser/)
+
+The script and config file must be located in the same directory. A systemD service file can be created to run these scripts automatically on start:
+
+```shell
+[Unit]
+Description=Watcher Script for MongoDB Auditing
+After=network.target
+
+[Service]
+User=mongod
+Group=mongod
+Environment="KRB5_CLIENT_KTNAME=/data/pki/audit.keytab"
+ExecStart=/bin/python /data/scripts/event_watcher.py
+Type=simple
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ## deployment_configs
 
@@ -256,6 +352,24 @@ The `excluded_root_keys` option is a comma separated list of root-level keys to 
 
 The `role_search_term` is a comma separated list of regex terms to use to search for users who have admin-like privileges that should not.
 
+### Setup
+
+This script should reside on a single server, most likely one of the Audit DB nodes.
+
+The following non-standard Python modules are required (and dependancies):
+
+* [pymongo](https://pypi.org/project/pymongo/)
+* [kerberos](https://pypi.org/project/kerberos/)
+* [configparser](https://pypi.org/project/configparser/)
+* [requests](https://pypi.org/project/requests2/)
+
+The script and config file must be located in the same directory. This script can be run from cron or Control-M at the frequency desired, such as:
+
+```shell
+KRB5_CLIENT_KTNAME=/data/scripts/audit.keytab
+00 * * * * python /data/scripts/deployment_configs.py
+```
+
 ## reporter
 
 The reporter script is a basic Python Flask application used to query and display reports relating to the auditing. The application also provides the ability to configure a standard to compare configurations against and the ability ti created waivers per deployment.
@@ -292,7 +406,22 @@ debug=false
 
 The application listens on port 8000 via HTTP, the script can be modified manually to change port and use HTTPS if desired.
 
+### Setup
+
+The script can run on any Linux node that has access to the Audit DB.
+
+The following non-standard Python modules are required (and dependancies):
+
+* [pymongo](https://pypi.org/project/pymongo/)
+* [kerberos](https://pypi.org/project/kerberos/)
+* [configparser](https://pypi.org/project/configparser/)
+* [flask](https://pypi.org/project/Flask/)
+
+The script and config file must be located in the same directory.
+
 The Flask application can be run standalone for via a setup with a web server and WSGI.
+
+The application is contained within the `flask directory` and can be run in the foreground with `python /data/scripts/flask/reporter.py` or `python3 /data/scripts/flask/reporter.py`.
 
 ## Permissions
 
@@ -384,16 +513,3 @@ The `reporter` script user that accesses the audit db will need the following pr
 }
 ```
 
-## Setup
-
-The following non-standard Python modules are required (and dependancies):
-
-* [pymongo](https://pypi.org/project/pymongo/)
-* [kerberos](https://pypi.org/project/kerberos/)
-* [configparser](https://pypi.org/project/configparser/)
-
-The `deployment_configs` script also requires the following in addition to the above main list:
-* [requests](https://pypi.org/project/requests2/)
-
-The `reporter` script also requires the following in addition to the above main list:
-* [flask](https://pypi.org/project/Flask/)
