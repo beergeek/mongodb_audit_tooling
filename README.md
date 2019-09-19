@@ -423,6 +423,81 @@ The Flask application can be run standalone for via a setup with a web server an
 
 The application is contained within the `flask directory` and can be run in the foreground with `python /data/scripts/flask/reporter.py` or `python3 /data/scripts/flask/reporter.py`.
 
+The website has a link for `http://<website>:8000/admin` for managing the standard and supplementry pipeline, as well as waivers.
+
+The standard is in the Ops Manager-like format, with `processes` and `project` keys. The value for `processes` is the same as that for Ops Manager managed hosts. The project covers the overall project settings similar to Ops Manager.
+
+Example:
+
+```JSON
+{
+  "project": {
+    "ssl": {
+      "clientCertificateMode": "OPTIONAL", 
+      "CAFilePath": "/data/pki/ca.cert", 
+      "autoPEMKeyFilePath": "/etc/mongodb-mms/aa.pem"
+    }, 
+    "kerberos": {
+      "serviceName": "mongodb"
+    }, 
+    "auth": {
+      "deploymentAuthMechanisms": [
+        "MONGODB-CR", 
+        "SCRAM-SHA-256", 
+        "SCRAM-SHA-256"
+      ], 
+      "autoAuthMechanism": "MONGODB-CR"
+    }
+  }, 
+  "valid_from": {
+    "$date": 1568352456013
+  }, 
+  "processes": {
+    "authSchemaVersion": 5.0, 
+    "kerberos": {
+      "keytab": "/data/pki/server_keytab"
+    }, 
+    "featureCompatibilityVersion": "4.0", 
+    "disabled": false, 
+    "logRotate": {
+      "timeThresholdHrs": 24.0, 
+      "sizeThresholdMB": 1000.0
+    }, 
+    "version": "4.0.12-ent", 
+    "args2_6": {
+      "net": {
+        "ssl": {
+          "mode": "preferSSL", 
+          "disabledProtocols": "TLS1_0,TLS1_1"
+        }, 
+        "port": 27017, 
+        "bindIpAll": true
+      }, 
+      "storage": {
+        "wiredTiger": {
+          "engineConfig": {
+            "directoryForIndexes": true
+          }
+        }, 
+        "directoryPerDB": true
+      }, 
+      "security": {
+        "encryptionKeyFile": "/data/pki/mongodb_keyfile", 
+        "enableEncryption": true
+      }, 
+      "systemLog": {
+        "destination": "file"
+      }
+    }, 
+    "manualMode": false
+  }, 
+  "_id": {
+    "$oid": "5d75c89f0caa1e7b707ba511"
+  }, 
+  "schema_version": 0
+}
+```
+
 ## Permissions
 
 For all of the scripts, the user that is writing to the MongoDB audit database must have `readWrite` permissions on the `logging` database and `log` collection.
