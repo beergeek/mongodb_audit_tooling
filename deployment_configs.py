@@ -14,7 +14,7 @@ try:
   import datetime
   import re
   from pprint import pprint
-  from bson.json_util import dumps
+  from bson.json_util import dumps, loads
   from pymongo.errors import OperationFailure,PyMongoError
   if sys.version_info[0] >= 3:
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -262,9 +262,9 @@ def check_list(k, s_array, d_array, waivers):
         break
   return failure_data
 
-def get_users(hostname, port, replica_set):
+def process_aggregation(hostname, port, replica_set, pipeline_array):
   try:
-    user_list = []
+    documents = []
     local_connection_string = "mongodb://" + DB_CREDENTIALS + "@" + hostname + ":" + str(port) + "/?replicaSet=" + replica_set + "&authSource=" + AUTH_SOURCE + "&authMechanism=" + AUTH_METHOD
     if DEPLOY_DB_SSL is True:
       if DEBUG is True:
@@ -276,67 +276,23 @@ def get_users(hostname, port, replica_set):
         logging.debug("Not ussing SSL/TLS to %s:%s" % (hostname,str(port)))
         print("Not using SSL/TLS to %s:%s" % (hostname,str(port)))
       local = pymongo.MongoClient(local_connection_string, serverSelectionTimeoutMS=DEPLOY_DB_TIMEOUT)
-    #serverVersion = tuple(local.server_info()['version'].split('.'))
-    local_db = local['admin']
-    user_collection = local_db['system.users']
-    #if serverVersion < tuple("4.0.0".split(".")):
-    user_pipeline = [
-      {
-        "$match": {
-          "$or": [
-            { 
-              "db": {
-                "$ne": "$external"
-              }
-            },
-            {
-              "$and": [
-                {
-                  "$or": [
-                    {
-                      "roles.role": "root"
-                    },
-                    {
-                      "roles.role": re.compile(ROLE_SEARCH_TERMS)
-                    }
-                  ]
-                },
-                {
-                  "user": {
-                    "$not": re.compile('admin@')
-                  }
-                }
-              ]
-            }
 
-            ]
-        }
-      },
-      {
-        "$project": {
-          "list": {
-            "$objectToArray": "$credentials"
-          },
-          "roles": 1,
-          "db": 1,
-          "user": 1,
-          "_id": 0
-        }
-      },
-      {
-        "$project": {
-          "mech": "$list.k",
-          "roles": 1,
-          "db": 1,
-          "user": 1
-        }
-      }
-]
-    users = user_collection.aggregate(user_pipeline)
+    for data in loads(pipeline_array):
+      results_array = []
+      if 'database' in data:
+        db = local[data['database']]
+      else:
+        db = local['admin']
+      coll = db[data['collection']]
+      query_data = coll.aggregate(data['pipeline'])
+      for document in query_data:
+        pprint(document)
+        results_array.append(document)
+      test_data = {'test_name': data['name'], 'issue': results_array}
+      documents.append(test_data)
     local.close()
-    for user in users:
-      user_list.append(user)
-    return user_list
+    #pprint(documents)
+    return documents
   except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure) as e:
     logging.error("Cannot connect to deployment %s: %s" % (replica_set,e))
     if DEBUG:
@@ -348,18 +304,24 @@ def get_users(hostname, port, replica_set):
       print("Cannot execute on deployment %s: %s" % (replica_set,e))
     return ["Cannot execute on deployment %s on %s. This maybe a permissions issue" % (replica_set, hostname)]
 
-def get_cluster_users(deployment_id):
-  user_list = []
+def get_primary(deployment_id):
+  primary = None
   cluster_list = get('/groups/' + deployment_id + '/clusters')
   for cluster in cluster_list['results']:
     host_list = get('/groups/' + deployment_id + '/hosts/?clusterId=' + cluster['id'])
     for host in host_list['results']:
-      deployment_users = {}
       if host['typeName'] == 'REPLICA_PRIMARY' or host['typeName'] == 'SHARD_MONGOS':
-        deployment_users = get_users(host['hostname'], host['port'], host['replicaSetName'])
-        user_list.extend(copy.deepcopy(deployment_users))
+        primary = host
         break
-  return user_list
+  return primary
+
+
+def get_supplementry(id, pipeline):
+  primary = get_primary(id)
+  agg_output = process_aggregation(primary['hostname'], primary['port'], primary['replicaSetName'], pipeline)
+  return agg_output
+
+
 
 def check_user_waiver(user_dict, waiver_list):
   failure_data = {"issue": [], "waiver": []}
@@ -475,8 +437,8 @@ def main():
   DEPLOYMENTS = get('/groups')
   if DB_CREDENTIALS and NON_OM_DEPLOYMENTS:
     deploys = get_non_om_deployments()
-    if type(deploys) is dict:
-      DEPLOYMENTS['results'].extend()
+    if type(deploys) is list:
+      DEPLOYMENTS['results'].extend(deploys)
 
   for deployment in DEPLOYMENTS['results']:
     if 'hostCounts' in deployment and (deployment['hostCounts']['mongos'] > 0 or deployment['hostCounts']['primary'] > 0):
@@ -501,26 +463,20 @@ def main():
 
       # Only check for compliance if there is a standard to check against
       if STANDARDS and DB_CREDENTIALS:
-        # check the users in a deployment locally at the deployment
-        if 'id' in deployment:
-          # For Ops Manager controlled
-          users = get_cluster_users(deployment['id'])
-        else:
-          # For non-Ops Manager deployments
-          users = get_users(desired_state['processes'][0]['hostname'],desired_state['processes'][0]['args2_6']['net']['port'],desired_state['processes'][0]['args2_6']['replication']['replSetName'])
-        if 'local_users' not in waiver_details:
-          waiver_details['local_users'] = []
-        user_details = check_user_waiver(users, waiver_details['local_users'])
-        if 'admin_users' not in waiver_details:
-          waiver_details['admin_users'] = []
-        admin_details = check_admin_waiver(users, waiver_details['admin_users'])
-        user_details['host'] = 'Users'
-        user_details['issue'].extend(admin_details['issue'])
-        user_details['waiver'].extend(admin_details['waiver'])
-        desired_state['compliance'].append(copy.deepcopy(user_details))
+        if STANDARDS['supplementry_pipeline']:
+          # check the users in a deployment locally at the deployment
+          if 'id' in deployment:
+            # For Ops Manager controlled
+            compliance = get_supplementry(deployment['id'], STANDARDS['supplementry_pipeline'])
+          else:
+            # For non-Ops Manager deployments
+            compliance = process_aggregation(desired_state['processes'][0]['hostname'],desired_state['processes'][0]['args2_6']['net']['port'],desired_state['processes'][0]['args2_6']['replication']['replSetName'], STANDARDS['supplementry_pipeline'])
+
+          print(compliance)
+          desired_state['compliance'].append({'host': 'Supplementry', 'issues': copy.deepcopy(compliance)})
         if 'project' not in waiver_details:
           waiver_details['project'] = {}
-        deployment_compliance = check_dict('', STANDARDS['project'], desired_state, waiver_details['project'])
+        deployment_compliance = check_dict('', STANDARDS['standard']['project'], desired_state, waiver_details['project'])
         deployment_compliance['host'] = 'Project Level'
         # Deep copy because Python does copy by reference
         desired_state['compliance'].append(copy.deepcopy(deployment_compliance))
@@ -532,7 +488,7 @@ def main():
           if STANDARDS:
             if 'processes' not in waiver_details:
               waiver_details['processes'] = {}
-            compliance = check_dict("processes", STANDARDS['processes'], instance, waiver_details['processes'])
+            compliance = check_dict("processes", STANDARDS['standard']['processes'], instance, waiver_details['processes'])
             # If we have a compliance issue or waiver in place we record that too
             if compliance:
               compliance['host'] = instance['hostname']

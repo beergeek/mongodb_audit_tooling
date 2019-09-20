@@ -11,6 +11,7 @@ try:
   import re
   import ast
   import datetime
+  from pprint import pprint
   from pymongo import ReturnDocument
   from pymongo.errors import OperationFailure
   from bson.json_util import dumps, loads
@@ -398,15 +399,29 @@ def admin_tasks():
     # Index {'valid_to': 1} on `logging.standards`
     standards = standards_collection.find_one({"valid_to": {"$exists": False}})
     deployments = list(config_collection.distinct("deployment"))
-    return render_template('admin_tasks.html', standards=dumps(standards, indent=2), deployments=deployments, standard_id=standards['_id'])
+    return render_template('admin_tasks.html', standards=dumps(standards['standard'], indent=2), supplementry_pipeline=dumps(loads(standards['supplementry_pipeline']), indent=2), deployments=deployments, standard_id=standards['_id'])
   except OperationFailure as e:
     print(e.details)
 
-@app.route("/update_standard/<oid>", methods=['GET'])
-def update_standard(oid):
+@app.route("/update_standard", methods=['POST'])
+def update_standard():
   try:
-    standard_data = loads(request.args['standard'])
-    standard_data.pop('_id')
+    oid = request.form['oid']
+    standard_data = {}
+    standard_data['standard'] = loads(request.form['standard'])
+
+    if request.form['supplementry_pipeline']:
+      try:
+        # Let's see if we can even load the string as JSON and if certain keys exist.
+        supplementry_pipeline = loads('{"pipelines": %s}' % request.form['supplementry_pipeline'])
+      except ValueError as e:
+        return render_template('badness.html', message="The supplementry pipeline is not correct: %s" % e)
+      for query in supplementry_pipeline['pipelines']:
+        if 'name' not in query or 'collection' not in query or 'pipeline' not in query:
+          return render_template('badness.html', message='The supplementry pipeline requires at least a `name`, `collection` and a `pipeline` key/value pair, with a possible `database` key/value pair.')
+    standard_data['supplementry_pipeline'] = re.sub(r'\s|  ','', request.form['supplementry_pipeline'])
+    if '_id' in standard_data['standard']:
+      standard_data['standard'].pop('_id')
     standard_data['valid_from'] = datetime.datetime.now()
     standard_data['schema_version'] = 0
     response_update = standards_collection.update_one({"_id": ObjectId(oid)}, {"$set": standard_data}, upsert=True)
@@ -418,6 +433,7 @@ def update_standard(oid):
     else:
       new_standard = list(standards_collection.find({"valid_to": {"$exists": False}}))
       outcome = "We have an issue!"
+    new_standard['supplementry_pipeline'] = dumps(loads(new_standard['supplementry_pipeline']), indent=2)
     return render_template('new_standard.html', outcome=outcome, new_standard=dumps(new_standard, indent=2))
   except OperationFailure as e:
     print(e.details)
@@ -468,6 +484,10 @@ def deployment_waiver():
       details['version'] = waiver_details['processes']['version']
     except (KeyError, TypeError):
       pass
+    try:
+      details['supplementry_pipeline'] = waiver_details['supplementry_waiver_list']
+    except (KeyError, TypeError):
+      pass
     return render_template("waiver_details.html", details=details, deployment=request.args['deployment'])
   except OperationFailure as e:
     print(e.details)
@@ -479,6 +499,17 @@ def update_waiver():
     end_date = datetime.datetime.strptime(request.form['end'], "%a, %d %b %Y %H:%M:%S %Z")
     start_date = datetime.datetime.strptime(request.form['start'], "%a, %d %b %Y %H:%M:%S %Z")
     auth = []
+
+    if request.form['supplementry_waiver']:
+      try:
+        #Needs to convert to dictionary
+        supplementry_waiver_list = request.form['supplementry_waiver'].split('\r\n')
+        print(supplementry_waiver_list)
+      except ValueError as e:
+        return render_template('badness.html', message="The supplementry pipeline is not correct: %s" % e)
+    else:
+      supplementry_waiver_list = []
+
     if 'GSSAPI' in request.form:
       auth.append('GSSAPI')
     if 'SCRAM-SHA-1' in request.form:
@@ -487,10 +518,8 @@ def update_waiver():
       auth.append('SCRAM-SHA-256')
     if 'LDAP' in request.form:
       auth.append('PLAIN')
-    local_users = request.form['local_users'].split()
-    admin_users = request.form['admin_users'].split()
-    update_details = {"deployment": deployment,"valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(),"comments": request.form['comments'], "local_users": local_users, "admin_users": admin_users}
-    new_waiver = {"deployment": deployment, "valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(), "local_users": local_users, "admin_users": admin_users}
+    update_details = {"deployment": deployment,"valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(),"comments": request.form['comments'], "supplementry_waivers": supplementry_waiver_list}
+    new_waiver = {"deployment": deployment, "valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(), "supplementry_waivers": supplementry_waiver_list}
     if 'version' in request.form:
       if 'processes' not in update_details:
         update_details['processes'] = {}
@@ -503,6 +532,8 @@ def update_waiver():
     # Index {"deployment": 1} on `logging.waivers`
     details = waivers_collection.find_one_and_update({"deployment": deployment},{"$set": update_details}, upsert=True, return_document=ReturnDocument.AFTER)
     waivers_archive_collection.insert_one(new_waiver)
+    #details['supplementry_pipeline'] = dumps(loads(details['supplementry_pipeline']), indent=2)
+    print(details['supplementry_waivers'])
     return render_template('new_waiver.html', new_waiver=dumps(details, indent=2))
   except OperationFailure as e:
     print(e.details)
