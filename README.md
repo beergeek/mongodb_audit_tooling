@@ -421,7 +421,7 @@ The script and config file must be located in the same directory.
 
 The Flask application can be run standalone for via a setup with a web server and WSGI.
 
-The application is contained within the `flask directory` and can be run in the foreground with `python /data/scripts/flask/reporter.py` or `python3 /data/scripts/flask/reporter.py`.
+The application is contained within the `flask directory` and can be run in the foreground with `env KRB5_CLIENT_KTNAME=/data/pki/audit.keytab python /data/scripts/flask/reporter.py` or `env KRB5_CLIENT_KTNAME=/data/pki/audit.keytab python3 /data/scripts/flask/reporter.py`.
 
 The website has a link for `http://<website>:8000/admin` for managing the standard and supplementry pipeline, as well as waivers.
 
@@ -512,6 +512,11 @@ For the `deployment_configs` script will only retrieve deployments that the API 
 
 ```JSON
 {
+  "roles": [
+    {"role": "readAnyDatabase", "db": "admin"},
+    {"role": "clusterMonitor", "db": "admin"},
+    {"role": "backup", "db": "admin"}
+  ],
   "privileges" : [
   	{
   		"resource" : {
@@ -540,7 +545,19 @@ The `reporter` script user that accesses the audit db will need the following pr
   			"collection" : "standards"
   		},
   		"actions" : [
-  			"find"
+        "find",
+        "insert",
+        "update",
+  		]
+  	},
+  	{
+  		"resource" : {
+  			"db" : "logging",
+  			"collection" : "standards_archive"
+  		},
+  		"actions" : [
+        "find",
+        "insert"
   		]
   	},
   	{
@@ -549,7 +566,19 @@ The `reporter` script user that accesses the audit db will need the following pr
   			"collection" : "waivers"
   		},
   		"actions" : [
-  			"find"
+        "find",
+        "insert",
+        "update",
+  		]
+  	},
+  	{
+  		"resource" : {
+  			"db" : "logging",
+  			"collection" : "waivers_archive"
+  		},
+  		"actions" : [
+        "find",
+        "insert"
   		]
   	},
   	{
