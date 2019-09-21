@@ -10,7 +10,37 @@ The following tools are in this repository:
 * deployment_configs (to retrieve all the deployment configurations from Ops Manager)
 * reporter (basic Flask app to query and display various reports and admin tasks)
 
+# Table of Contents
+
+1. [Pre-reqs](#pre-reqs)
+2. [Details](#details)
+    * [log_processor](#log_processor)
+    * [config_watcher](#config_watcher)
+    * [event_watcher](#event_watcher)
+    * [deployment_configs](#deployment_configs)
+    * [reporter](#reporter)
+3. [Permissions](#permissions)
+4. [Indexes](#indexes)
+
 # Details
+
+## Pre-reqs
+
+This solution requires an Audit DB (MongoDB obviously) that will be used to store all the audit and configuration data. We recommend a replica set with apporpriate security.
+
+A `logging` database will be created by the scripts with the following collections:
+
+* configs
+* configs_archive
+* logs
+* standards
+* standards_archive
+* waivers
+* waivers_archive
+
+The required user permissions for each script are described in the [Permissions](#permissions) section.
+
+The database and user(s) must be configured (with permissions) before the scripts will function.
 
 ## log_processor
 
@@ -135,7 +165,7 @@ debug=<BOOLEAN_VALUE>
 Example:
 ```shell
 [ops_manager_db]
-connection_string=mongodb://admin:superpassword@mongod0.mongodb.local:27017/?replicaSet=appdb
+connection_string=mongodb://auditReader:superpassword@mongod0.mongodb.local:27017/?replicaSet=appdb
 timeout=1000
 ssl_enabled=True
 ssl_ca_cert_path=/data/pki/ca.cert
@@ -149,7 +179,7 @@ ssl_ca_cert_path=/data/pki/ca.cert
 ssl_pem_path=/data/pki/mongod6.mongodb.local.pem
 
 [general]
-debug=True
+debug=true
 ```
 
 NOTE that URL encoded special characters require double `%`, e.g `@` would be `%%40`.
@@ -233,7 +263,7 @@ ssl_pem_path=/data/pki/mongod3.mongodb.local.pem
 ssl_ca_cert_path=/data/pki/ca.cert
 
 [general]
-debug=False
+debug=false
 ```
 
 NOTE that URL encoded special characters require double `%`, e.g `@` would be `%%40`.
@@ -330,7 +360,6 @@ ssl_pem_path=/data/pki/auditor.mongodb.local.pem
 [general]
 debug=false
 excluded_root_keys=mongoDbVersions,mongosqlds,backupVersions,agentVersion,monitoringVersions,uiBaseUrl,cpsModules,mongots,indexConfigs
-role_search_terms=Admin,schema
 
 [deployments]
 db_credentials=auditwriter%%40MONGODB.LOCAL
@@ -498,15 +527,88 @@ Example:
 }
 ```
 
+The supplementry pipeline is an array of hashses (dictionaries, whatever you bloody want to call them), where the nested hash contains the following:
+
+```JSON
+[
+  {
+    "name": <TEST_NAME>,
+    "pipeline": <AGGREGATION PIPELINE>,
+    "database": <DATABASE,
+    "collection": <COLLECTION>
+  },
+  {
+    "name": <TEST_NAME>,
+    "pipeline": <AGGREGATION PIPELINE>,
+    "database": <DATABASE,
+    "collection": <COLLECTION>
+  }
+]
+```
+
+The aggregation pipeline is stored as a string in the Audit DB because we cannot store the BSON as the key names can start with `$`, such as `$match` or `project`, which is illegal in MongoDB. The pipelines are turned into BSON, to determine if they will parse, before reverting to string format to be saved int he bases.
+
+The waivers for the standard have the same format as the structure for the standard. The waiver for the supplementry checks is a simple list per project with the name of the supplementry checks to waiver, hence this must align with the name of the individual tests in the supplementry check pipeline.
+
+```shell
+<TEST_NAME_A>
+<TEST_NAME_B>
+```
+
 ## Permissions
 
-For all of the scripts, the user that is writing to the MongoDB audit database must have `readWrite` permissions on the `logging` database and `log` collection.
+For all of the scripts, the user that is writing to the MongoDB audit database must have `readWrite` permissions on the `logging` database and `logs` collection.
 
-For the `log_processor` script the user executing the script will need to be able to read the database audit log.
+Example:
+
+```JSON
+{
+  "role": "auditWriter",
+  "roles": [],
+  "privileges": [
+    {
+      "resource": {"db": "logging", "collection": "logs"},
+      "actions": [ "insert" ]
+    }
+  ]
+}
+```
+
+For the `log_processor` script the user executing the script will need to be able to read the database audit log file.
 
 For the `config_watcher` script the user will need to have `read` privileges on the `config.appState` collection within the `cloudconf` database in the Ops Manager application database.
 
+Example:
+
+```JSON
+{
+  "role": "configReader",
+  "roles": [],
+  "privileges": [
+    {
+      "resource": {"db": "cloudconf", "collection": "config.appState"},
+      "actions": [ "find", "changeStream" ]
+    }
+  ]
+}
+```
+
 For the `event_watcher` script the user will need to have `read` privileges on the `data.events` collection within the `mmsdb` database in the Ops Manager application database.
+
+Example:
+
+```JSON
+{
+  "role": "eventReader",
+  "roles": [],
+  "privileges": [
+    {
+      "resource": {"db": "mmsdb", "collection": "data.events"},
+      "actions": [ "find", "changeStream" ]
+    }
+  ]
+}
+```
 
 For the `deployment_configs` script will only retrieve deployments that the API user has permissions to access. The user will also need the following access on all deployments:
 
@@ -531,8 +633,6 @@ For the `deployment_configs` script will only retrieve deployments that the API 
   ]
 }
 ```
-
-For the `reporter` script the 
 
 The `reporter` script user that accesses the audit db will need the following privileges:
 
@@ -617,3 +717,20 @@ The `reporter` script user that accesses the audit db will need the following pr
 }
 ```
 
+# Indexes
+
+The Audit DB will need some indexes to allow for fast queries of data for report creation.
+
+```shell
+use logging
+db.configs.createIndex({"users_array": 1})
+db.configs.createIndex({"deployment": 1})
+db.logs.createIndex({"users.user": 1, "ts": 1 })
+db.logs.createIndex({"fullDocument.un": 1, "ts": 1 })
+db.logs.createIndex({"fullDocument.deploymentDiff.diffs.processes.id": 1, "source": 1, "ts": 1 })
+db.logs.createIndex({"fullDocument.clusterConfig.cluster.processes.hostname": 1, "source": 1, "ts": 1 })
+db.logs.createIndex({"source": 1, "tag": 1, "ts": 1 })
+db.configs_archive.createIndex({"deployment": 1, "ts": 1 })
+db.standards.createIndex({"valid_to": 1})
+db.waivers.createIndex({"deployment": 1, "valid_from": 1, "valid_to": 1})
+```
