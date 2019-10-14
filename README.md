@@ -46,7 +46,7 @@ This script reads the MongoDB audit log and sends each entry, after formatting, 
 
 The data from the MongoDB databases must be in JSON format and written out to a file. The process for doing this can be found in the [MongoDB documentation](https://docs.mongodb.com/manual/core/auditing/).
 
-The script uses a configuration file (`log_processor.conf`) that must reside in the same location as the script.
+By default, the script uses a configuration file (`log_processor.conf`) that must reside in the same location as the script. Alternatively you can specify a config file (and log file) if desired: see the [Running the script](#running-the-script) section. By using the alternative config and log file options you can run one `log_processor.py` script with multiple configurations to process multiple instances of MongoDB audit logs.
 
 The configuration file has the following format (__NOTE__: none of the string have quotes):
 
@@ -130,6 +130,20 @@ Type=simple
 
 [Install]
 WantedBy=multi-user.target
+```
+
+### Running the script
+
+The script can simply be run with:
+
+```shell
+python3 log_processor.py
+```
+
+Or if a different config or log file is required the following can be run, as an example:
+
+```shell
+python3 /data/scripts/log_processor.py -c /data/scripts/db0.conf -l /data/scripts/db0.log
 ```
 
 ## event_watcher

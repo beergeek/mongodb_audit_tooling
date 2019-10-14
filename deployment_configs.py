@@ -1,4 +1,5 @@
 try:
+  import argparse
   import requests
   import configparser
   from requests.auth import HTTPDigestAuth
@@ -23,8 +24,12 @@ except ImportError as e:
   print(e)
   exit(1)
 
-LOG_FILE = sys.path[0] + '/deployment_configs.log'
-CONF_FILE = sys.path[0] + '/deployment_configs.conf'
+parser = argparse.ArgumentParser(description='Script to retrieve and process MongoDB deployment configurations')
+parser.add_argument('--config','-c', dest='config_file', default=sys.path[0] + '/deployment_configs.conf', required=False, help="Alternative location for the config file")
+parser.add_argument('--log','-l', dest='log_file', default=sys.path[0] + '/deployment_configs.log', required=False, help="Alternative location for the log file")
+args = parser.parse_args()
+LOG_FILE = args.log_file
+CONF_FILE = args.config_file
 waiver_processes = {"processes": {"version": "WAIVER"}}
 ROLE_SEARCH_TERMS = []
 
