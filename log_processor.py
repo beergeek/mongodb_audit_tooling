@@ -1,4 +1,5 @@
 try:
+  import argparse
   import configparser
   import datetime
   import json
@@ -48,14 +49,20 @@ class UTC(datetime.tzinfo):
   def dst(self, dt):
     return datetime.timedelta(hours=1)
 
-def get_config():
-  CONF_FILE = sys.path[0] + '/log_processor.conf'
-  LOG_FILE = sys.path[0] + '/log_processor.log'
+def get_cmd_args():
+  parser = argparse.ArgumentParser(description='Script to process MongoDB audit log')
+  parser.add_argument('--config','-c', dest='config_file', default=sys.path[0] + '/log_processor.conf', required=False, help="Alternative location for the config file")
+  parser.add_argument('--log','-l', dest='log_file', default=sys.path[0] + '/log_processor.log', required=False, help="Alternative location for the log file")
+  return parser.parse_args()
+
+def get_config(args):
+  CONF_FILE = args.config_file
+  LOG_FILE = args.log_file
   # Get config setting from `log_processor.config` file
   if os.path.isfile(CONF_FILE) == False:
     logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
-    logging.error('The `log_processor.conf` file must exist in the same directory as the Python script')
-    print('\033[93m' + 'The `log_processor.conf` file must exist in the same directory as the Python script, exiting' + '\033[m')
+    logging.error('The log file must exist in the same directory as the Python script')
+    print('\033[93m' + 'The log file must exist in the same directory as the Python script, exiting' + '\033[m')
     sys.exit(1)
 
   config = configparser.ConfigParser()
@@ -201,7 +208,8 @@ def main():
   LOG_FILE = sys.path[0] + '/log_processor.log'
 
   # get our config
-  config_data = get_config()
+  args = get_cmd_args()
+  config_data = get_config(args)
 
   # retrieve and add our resume token to the config data
   # `resume_token` is a global variable so exit handlers can grab it easily
