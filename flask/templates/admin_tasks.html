@@ -7,13 +7,19 @@
   <body>
     <h1>Admin Tasks</h1>
       <h2>Standard</h2>
-      <form action="update_standard/{{standard_id}}">
-      <table>
+      <form action="update_standard" method="POST">
+        <input type="text" name="oid" value="{{standard_id}}" hidden />
+        <table>
         <tr>
-          <td><textarea rows="100" cols="200" name="standard">{{standards}}</textarea></td>
+          <td>Standard:</td>
+          <td><textarea cols="100" rows="50"  name="standard">{{standards}}</textarea></td>
         </tr>
         <tr>
-          <td><input type="submit"></td>
+          <td>Supplementry Pipeline:</td>
+          <td><textarea cols="100" rows="50" id="supplementry_pipeline" name="supplementry_pipeline">{{supplementry_pipeline}}</textarea></td>
+        </tr>
+        <tr>
+          <td rowspan="2"><input type="submit"></td>
         </tr>
       </table>
     </form>

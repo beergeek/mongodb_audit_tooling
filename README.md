@@ -492,8 +492,6 @@ Example:
 
 For the `log_processor` script the user executing the script will need to be able to read the database audit log file.
 
-For the `config_watcher` script the user will need to have `read` privileges on the `config.appState` collection within the `cloudconf` database in the Ops Manager application database.
-
 Example:
 
 ```JSON

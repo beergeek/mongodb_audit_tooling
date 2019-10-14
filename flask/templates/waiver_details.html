@@ -6,24 +6,25 @@
     <link rel="stylesheet" href="../static/pikaday.css">
     <script type="text/javascript">
       function stoppedTyping(){
-          if(document.getElementById('comments').value.length > 0) { 
-              document.getElementById('submitter').disabled = false; 
-          } else { 
+          if(document.getElementById('comments').value.length > 0) {
+              document.getElementById('submitter').disabled = false;
+          } else {
               document.getElementById('submitter').disabled = true;
           }
       }
         function setUTCStart() {
           document.getElementById('start').value = new Date(document.getElementById('start_date').value).toUTCString();
-        };  
+        };
         function setUTCEnd() {
           document.getElementById('end').value = new Date(document.getElementById('end_date').value).toUTCString();
-        };  
+        };
   </script>
   </head>
   <body>
     <h1>Waiver Details</h1>
       <h2>{{deployment}}</h2>
-      <form action="update_waiver/{{deployment}}">
+      <form action="update_waiver" method="POST">
+      <input type="text" name="deployment" hidden value="{{deployment}}" />
       <table>
         <tr>
           <td>Last Changed:</td>
@@ -43,6 +44,10 @@
         <tr>
           <td>MongoDB Version:</td>
           <td><input type="text" id="version" name="version" value="{{details['version']}}" /></td>
+        </tr>
+        <tr>
+          <td>Supplementry Waivers:</td>
+          <td><textarea cols="100" rows="50" id="supplementry_waiver" name="supplementry_waiver">{{details['supplementry_waivers']}}</textarea></td>
         </tr>
         <tr>
           <td>Waiver Approval Number:</td>

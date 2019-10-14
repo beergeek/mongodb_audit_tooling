@@ -11,6 +11,7 @@ try:
   import re
   import ast
   import datetime
+  from pprint import pprint
   from pymongo import ReturnDocument
   from pymongo.errors import OperationFailure
   from bson.json_util import dumps, loads
@@ -39,34 +40,21 @@ try:
     AUDIT_DB_SSL_CA = config.get('audit_db', 'ssl_ca_cert_path')
   OPS_MANAGER_TIMEOUT = config.getint('ops_manager','timeout', fallback=10)
   AUDIT_DB_TIMEOUT = config.getint('audit_db','timeout', fallback=10)
-except configparser.NoOptionError as e:
+except (configparser.NoOptionError,configparser.NoSectionError) as e:
   logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
-  logging.error('The config file must include the `connection_string` option in the `audit_db` section')
-  print('\033[91m' + "ERROR! The config file must include the `connection_string` option in both the `audit_db` section "
-    ", such as:\n"
-    + '\033[92m'
-    "[audit_db]"
-    "connection_string=mongodb://username:password@host:port/?replicaSet=replicasetname\n"
-    "ssl_enabled=True\n"
-    "ssl_pem_path=/data/pki/mongod3.mongodb.local.pem\n"
-    "ssl_ca_cert_path=/data/pki/ca.cert\n"
-    + '\033[m')
-  sys.exit(1)
-except configparser.NoSectionError as e:
-  logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
-  logging.error('The config file must include sections `audit_db` and `general`')
-  print('\033[91m' + "ERROR! The config file must include sections `audit_db`, and `general`, such as:\n"
-    + '\033[92m'
-    "[audit_db]\n"
-    "connection_string=mongodb://username:password@host:port/?replicaSet=replicasetname\n"
-    "ssl_enabled=True\n"
-    "ssl_pem_path=/data/pki/mongod3.mongodb.local.pem\n"
-    "ssl_ca_cert_path=/data/pki/ca.cert\n"
-    "timeout=1000\n\n"
-    "[general]\n"
-    "debug=False"
-    + '\033[m'
-    )
+  logging.error("The config file is missing data: %s" % e)
+  print("""\033[91mERROR! The config file is missing data: %s
+\033[92m
+[audit_db]
+connection_string=mongodb://web_user%%40MONGODB.LOCAL@mongod6.mongodb.local:27017/?replicaSet=repl0&authSource=$external&authMechanism=GSSAPI
+timeout=10
+ssl_enabled=True
+ssl_ca_cert_path=/data/pki/ca.cert
+ssl_pem_path=/data/pki/mongod6.mongodb.local.pem
+
+[general]
+debug=false
+\033[m""" % e)
   sys.exit(1)
 app = Flask(__name__)
 
@@ -115,7 +103,8 @@ def index():
     output0 = [ elem for elem in output0 if elem != None]
     # Multikey indexes can't be used for distinct
     output1 = list(audit_collection.distinct("fullDocument.clusterConfig.cluster.processes.hostname"))
-    # Index: {"deployment": 1} on `loggig.configs`
+    output1.append('OPS MANAGER')
+    # Index: {"deployment": 1} on `logging.configs`
     output2 = list(config_collection.distinct("deployment"))
     return render_template('index.html', users=output0, hosts=output1, deployments=output2)
   except OperationFailure as e:
@@ -191,68 +180,102 @@ def get_user_event_details(oid):
 @app.route("/host_report", methods=['GET'])
 def get_host():
   try:
-    host_search = re.compile("^%s" %request.args['host'])
-    host_pipeline = [
-      {
-        "$match": {
-          "$and": [
-            {"ts": {"$gt":  datetime.datetime.strptime(request.args['dtg_fixed_low_host'], "%a, %d %b %Y %H:%M:%S %Z")}},
-            {"ts": {"$lte": datetime.datetime.strptime(request.args['dtg_fixed_high_host'], "%a, %d %b %Y %H:%M:%S %Z")}}
-          ],
-          "$or": [
-            {
-              "source": 'DEPLOYMENT EVENT',
-              "$or": [
-                {
-                  "fullDocument.deploymentDiff.diffs.processes.id": host_search,
-                  "fullDocument.deploymentDiff.diffs.params": {
-                    "$eq": []
-                  }
-                },
-                {
-                  "fullDocument.clusterConfig.cluster.processes.hostname": host_search,
-                  "fullDocument.deploymentDiff.diffs.params": {
-                    "$ne": []
-                  }
-                }
-              ]
-            },
-            {
-              "source": "DATABASE AUDIT",
-              "tag": "CONFIG EVENT"
-            }
-          ]
-        }
-      }, 
-      {
-        "$project": {
-          "ts": 1,
-          "source": 1,
-          "User": {
-            "$ifNull": [{ "$arrayElemAt": [ "$users.user", 0 ] }, "$fullDocument.un"]
-          },
-          "Events": {
-            "$ifNull": ["$param.command",{"$arrayElemAt": ["$fullDocument.deploymentDiff.diffs.status",0]}]
-          },
-          "Hosts": {
-            "$ifNull": ["$host","$fullDocument.clusterConfig.cluster.processes.hostname"]
-          },
-          "Type": {
-            "$ifNull": ["$atype","Ops Manager-originated"]
+    host_search = re.compile("^%s" % request.args['host'])
+    if request.args['host'] == 'OPS MANAGER':
+      host_pipeline = [
+        {
+          "$match": {
+            "$and": [
+              {"ts": {"$gt":  datetime.datetime.strptime(request.args['dtg_fixed_low_host'], "%a, %d %b %Y %H:%M:%S %Z")}},
+              {"ts": {"$lte": datetime.datetime.strptime(request.args['dtg_fixed_high_host'], "%a, %d %b %Y %H:%M:%S %Z")}}
+            ],
+            "source": "OPS MANAGER CONFIG",
+            "tag": "OPS EVENT"
           }
+        }, 
+        {
+          "$project": {
+            "ts": 1,
+            "source": 1,
+            "User": {
+              "$ifNull": [{ "$arrayElemAt": [ "$users.user", 0 ] }, "$fullDocument.un"]
+            },
+            "Events": "$fullDocument",
+            "Hosts": "$host",
+            "Type": "$operationType"
+          }
+        },
+        {
+          "$sort": {
+            "ts": -1
+          }
+        },
+        {
+          "$limit": 100
         }
-      },
-      {
-        "$sort": {
-          "ts": -1
+      ]
+    else:
+      host_pipeline = [
+        {
+          "$match": {
+            "$and": [
+              {"ts": {"$gt":  datetime.datetime.strptime(request.args['dtg_fixed_low_host'], "%a, %d %b %Y %H:%M:%S %Z")}},
+              {"ts": {"$lte": datetime.datetime.strptime(request.args['dtg_fixed_high_host'], "%a, %d %b %Y %H:%M:%S %Z")}}
+            ],
+            "$or": [
+              {
+                "source": 'DEPLOYMENT EVENT',
+                "$or": [
+                  {
+                    "fullDocument.deploymentDiff.diffs.processes.id": host_search,
+                    "fullDocument.deploymentDiff.diffs.params": {
+                      "$eq": []
+                    }
+                  },
+                  {
+                    "fullDocument.clusterConfig.cluster.processes.hostname": host_search,
+                    "fullDocument.deploymentDiff.diffs.params": {
+                      "$ne": []
+                    }
+                  }
+                ]
+              },
+              {
+                "source": "DATABASE AUDIT",
+                "tag": "CONFIG EVENT"
+              }
+            ]
+          }
+        }, 
+        {
+          "$project": {
+            "ts": 1,
+            "source": 1,
+            "User": {
+              "$ifNull": [{ "$arrayElemAt": [ "$users.user", 0 ] }, "$fullDocument.un"]
+            },
+            "Events": {
+              "$ifNull": ["$param.command",{"$arrayElemAt": ["$fullDocument.deploymentDiff.diffs.status",0]}]
+            },
+            "Hosts": {
+              "$ifNull": ["$host","$fullDocument.clusterConfig.cluster.processes.hostname"]
+            },
+            "Type": {
+              "$ifNull": ["$atype","Ops Manager-originated"]
+            }
+          }
+        },
+        {
+          "$sort": {
+            "ts": -1
+          }
+        },
+        {
+          "$limit": 100
         }
-      },
-      {
-        "$limit": 100
-      }
-    ]
+      ]
 
-    # Indexes { fullDocument.deploymentDiff.diffs.processes.id: 1, source: 1, ts: 1 }, { fullDocument.clusterConfig.cluster.processes.hostname: 1, source: 1, ts: 1 }, { source: 1, tag: 1 } on `logging.logs`
+    # Indexes { fullDocument.deploymentDiff.diffs.processes.id: 1, source: 1, ts: 1 }, { fullDocument.clusterConfig.cluster.processes.hostname: 1, source: 1, ts: 1 }, { source: 1, tag: 1, ts: 1 } on `logging.logs`
     event_output = list(audit_collection.aggregate(host_pipeline,batchSize=100))
     events = []
     for event in event_output:
@@ -275,8 +298,10 @@ def get_host_event_details(oid):
     else:
       host_data = audit_collection.find_one({"_id": ast.literal_eval(oid)})
     formatted = dumps(host_data, indent=2)
-    if 'fullDocument' in host_data:
+    if 'fullDocument' in host_data and 'deploymentDiff' in host_data['fullDocument']:
       formatted_diff = dumps(host_data['fullDocument']['deploymentDiff']['diffs'], indent=2)
+    elif 'fullDocument' in host_data and '_id' in host_data['fullDocument']:
+      formatted_diff = dumps(host_data['fullDocument'], indent=2)
     else:
       formatted_diff = 'No data'
     return render_template('host_event_details_data.html', data=formatted, diff=formatted_diff, dtg=host_data['ts'])
@@ -352,6 +377,9 @@ def get_deployment():
 
     events = []
     for event in event_output:
+      for host in event['compliance']:
+        if host['host'] == 'Supplementry':
+          host = dumps(host)
       temp_config = {}
       temp_config['out_of_spec'] = []
       temp_config['out_of_spec'] = event['compliance']
@@ -398,26 +426,63 @@ def admin_tasks():
     # Index {'valid_to': 1} on `logging.standards`
     standards = standards_collection.find_one({"valid_to": {"$exists": False}})
     deployments = list(config_collection.distinct("deployment"))
-    return render_template('admin_tasks.html', standards=dumps(standards, indent=2), deployments=deployments, standard_id=standards['_id'])
+    if type(standards) is not dict:
+      standard_id = ''
+      standards = {}
+    else:
+      standard_id = standards['_id']
+    if 'standard' not in standards:
+      standards_data = ''
+    else:
+      standards_data = dumps(standards['standard'], indent=2)
+    if 'supplementry_pipeline' not in standards:
+      supp_data = ''
+    else:
+      supp_data = dumps(loads(standards['supplementry_pipeline']), indent=2)
+    return render_template('admin_tasks.html', standards=standards_data, supplementry_pipeline=supp_data, deployments=deployments, standard_id=standard_id)
   except OperationFailure as e:
     print(e.details)
 
-@app.route("/update_standard/<oid>", methods=['GET'])
-def update_standard(oid):
+@app.route("/update_standard", methods=['POST'])
+def update_standard():
   try:
-    standard_data = loads(request.args['standard'])
-    standard_data.pop('_id')
+    oid = request.form['oid']
+    standard_data = {}
+    try:
+      standard_data['standard'] = loads(request.form['standard'])
+    except ValueError as e:
+      return render_template('badness.html', message="The standard is not correct: %s" % e)
+
+    if request.form['supplementry_pipeline']:
+      try:
+        # Let's see if we can even load the string as JSON and if certain keys exist.
+        supplementry_pipeline = loads('{"pipelines": %s}' % request.form['supplementry_pipeline'])
+      except ValueError as e:
+        return render_template('badness.html', message="The supplementry pipeline is not correct: %s" % e)
+      for query in supplementry_pipeline['pipelines']:
+        if 'name' not in query or 'collection' not in query or 'pipeline' not in query:
+          return render_template('badness.html', message='The supplementry pipeline requires at least a `name`, `collection` and a `pipeline` key/value pair, with a possible `database` key/value pair.')
+    if request.form['supplementry_pipeline'] != '':
+      standard_data['supplementry_pipeline'] = re.sub(r'\s|  ','', request.form['supplementry_pipeline'])
+    if '_id' in standard_data['standard']:
+      standard_data['standard'].pop('_id')
     standard_data['valid_from'] = datetime.datetime.now()
     standard_data['schema_version'] = 0
+    if not ObjectId.is_valid(oid):
+      oid = ObjectId()
     response_update = standards_collection.update_one({"_id": ObjectId(oid)}, {"$set": standard_data}, upsert=True)
     standard_data['valid_to'] = datetime.datetime.now()
     standards_archive_collection.insert_one(standard_data)
-    if response_update.modified_count == 1:
+    if response_update.modified_count == 1 or response_update.upserted_id:
       new_standard = standards_collection.find_one({"_id": ObjectId(oid)})
       outcome = 'Success!'
     else:
-      new_standard = list(standards_collection.find({"valid_to": {"$exists": False}}))
+      new_standard = standards_collection.find_one({"valid_to": {"$exists": False}})
       outcome = "We have an issue!"
+    if 'supplementry_pipeline' in new_standard and new_standard['supplementry_pipeline'] != '':
+      new_standard['supplementry_pipeline'] = dumps(loads(new_standard['supplementry_pipeline']), indent=2)
+    else:
+      new_standard['supplementry_pipeline'] = ''
     return render_template('new_standard.html', outcome=outcome, new_standard=dumps(new_standard, indent=2))
   except OperationFailure as e:
     print(e.details)
@@ -468,6 +533,10 @@ def deployment_waiver():
       details['version'] = waiver_details['processes']['version']
     except (KeyError, TypeError):
       pass
+    try:
+      details['supplementry_pipeline'] = waiver_details['supplementry_waiver_list']
+    except (KeyError, TypeError):
+      pass
     return render_template("waiver_details.html", details=details, deployment=request.args['deployment'])
   except OperationFailure as e:
     print(e.details)
@@ -479,6 +548,16 @@ def update_waiver():
     end_date = datetime.datetime.strptime(request.form['end'], "%a, %d %b %Y %H:%M:%S %Z")
     start_date = datetime.datetime.strptime(request.form['start'], "%a, %d %b %Y %H:%M:%S %Z")
     auth = []
+
+    if request.form['supplementry_waiver']:
+      try:
+        #Needs to convert to dictionary
+        supplementry_waiver_list = request.form['supplementry_waiver'].split('\r\n')
+      except ValueError as e:
+        return render_template('badness.html', message="The supplementry pipeline is not correct: %s" % e)
+    else:
+      supplementry_waiver_list = []
+
     if 'GSSAPI' in request.form:
       auth.append('GSSAPI')
     if 'SCRAM-SHA-1' in request.form:
@@ -487,10 +566,8 @@ def update_waiver():
       auth.append('SCRAM-SHA-256')
     if 'LDAP' in request.form:
       auth.append('PLAIN')
-    local_users = request.form['local_users'].split()
-    admin_users = request.form['admin_users'].split()
-    update_details = {"deployment": deployment,"valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(),"comments": request.form['comments'], "local_users": local_users, "admin_users": admin_users}
-    new_waiver = {"deployment": deployment, "valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(), "local_users": local_users, "admin_users": admin_users}
+    update_details = {"deployment": deployment,"valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(),"comments": request.form['comments'], "supplementry_waivers": supplementry_waiver_list}
+    new_waiver = {"deployment": deployment, "valid_to": end_date, "valid_from": start_date, "project" : {"auth": {"deploymentAuthMechanisms": auth}}, "changed_datetime": datetime.datetime.now(), "supplementry_waivers": supplementry_waiver_list}
     if 'version' in request.form:
       if 'processes' not in update_details:
         update_details['processes'] = {}

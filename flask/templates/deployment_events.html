@@ -28,12 +28,18 @@
           {% for i in event['out_of_spec'] %}
             <th>{{i['host']}}</th>
             <tr>
-            <td>
+            <td class='diff'>
             {% for j in i['issue'] %}
               <ul>
                 <li>{{j}}</li>
               </ul>
             {% endfor %}
+            <pre class="wrapper">
+            {% for j in i['issues'] %}
+Test: {{j['test_name']}}
+{{j['issue']}}<br/>
+            {% endfor %}
+            </pre>
               </td>
             </tr>
           {% endfor %}
@@ -44,12 +50,18 @@
           {% for i in event['out_of_spec'] %}
           <th>{{i['host']}}</th>
           <tr>
-          <td>
+          <td class='diff'>
             {% for j in i['waiver'] %}
               <ul>
                 <li>{{j}}</li>
               </ul>
             {% endfor %}
+            <pre class="wrapper">
+            {% for j in i['issues'] %}
+Test: {{j['test_name']}}
+{{j['waiver']}}<br/>
+            {% endfor %}
+            </pre>
           </td>
         </tr>
           {% endfor %}
