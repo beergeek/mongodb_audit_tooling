@@ -5,7 +5,6 @@ This repo contains several Python scripts designed to retrieve logging data from
 The following tools are in this repository:
 
 * log_processor (to process the audit logs from MongoDB instance and forward to a MongoDB audit database)
-* config_watcher (to retrieve configuration changes to Ops Manager and forward to a MongoDB audit database)
 * event_watcher (to retrieve audit events from Ops Manager and forward to a MongoDB audit database)
 * deployment_configs (to retrieve all the deployment configurations from Ops Manager)
 * reporter (basic Flask app to query and display various reports and admin tasks)
@@ -15,7 +14,6 @@ The following tools are in this repository:
 1. [Pre-reqs](#pre-reqs)
 2. [Details](#details)
     * [log_processor](#log_processor)
-    * [config_watcher](#config_watcher)
     * [event_watcher](#event_watcher)
     * [deployment_configs](#deployment_configs)
     * [reporter](#reporter)
@@ -575,23 +573,6 @@ Example:
 ```
 
 For the `log_processor` script the user executing the script will need to be able to read the database audit log file.
-
-For the `config_watcher` script the user will need to have `read` privileges on the `config.appState` collection within the `cloudconf` database in the Ops Manager application database.
-
-Example:
-
-```JSON
-{
-  "role": "configReader",
-  "roles": [],
-  "privileges": [
-    {
-      "resource": {"db": "cloudconf", "collection": "config.appState"},
-      "actions": [ "find", "changeStream" ]
-    }
-  ]
-}
-```
 
 For the `event_watcher` script the user will need to have `read` privileges on the `data.events` collection within the `mmsdb` database in the Ops Manager application database.
 
