@@ -61,8 +61,8 @@ def get_config(args):
   # Get config setting from `log_processor.config` file
   if os.path.isfile(CONF_FILE) == False:
     logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
-    logging.error('The log file must exist in the same directory as the Python script')
-    print('\033[93m' + 'The log file must exist in the same directory as the Python script, exiting' + '\033[m')
+    logging.error('The config file must exist in the same directory as the Python script')
+    print('\033[93m' + 'The config file must exist in the same directory as the Python script, exiting' + '\033[m')
     sys.exit(1)
 
   config = configparser.ConfigParser()
