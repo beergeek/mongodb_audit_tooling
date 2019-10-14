@@ -18,11 +18,11 @@ except ImportError as e:
 
 def write_resume_token(signum, frame):
   if resume_token:
-    outfile = open(sys.path[0] + '/.config_resume_token', 'w')
+    outfile = open(sys.path[0] + '/.event_resume_token', 'w')
     outfile.write(resume_token)
     outfile.close()
-    logger.info("RESUME TOKEN: %s" % (resume_token))
-  logger.info("TERMINATING PROCESSING: %s" % datetime.datetime.now())
+    logging.info("RESUME TOKEN: %s" % (resume_token))
+  logging.info("TERMINATING PROCESSING: %s" % datetime.datetime.now())
   sys.exit(0)
 
 # global varible
@@ -30,19 +30,19 @@ resume_token = None
 signal.signal(signal.SIGINT, write_resume_token)
 signal.signal(signal.SIGTERM, write_resume_token)
 
-# Get config setting from `config_watcher.config` file
+# Get config setting from `event_watcher.config` file
 def get_config():
-  LOG_FILE = sys.path[0] + '/config_watcher.log'
-  CONF_FILE = sys.path[0] + '/config_watcher.conf'
+  LOG_FILE = sys.path[0] + '/event_watcher.log'
+  CONF_FILE = sys.path[0] + '/event_watcher.conf'
   if os.path.isfile(CONF_FILE) == False:
     logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
-    logging.error('The `config_watcher.conf` file must exist in the same directory as the Python script')
-    print('\033[93m' + 'The `config_watcher.conf` file must exist in the same directory as the Python script, exiting' + '\033[m')
+    logging.error('The `event_watcher.conf` file must exist in the same directory as the Python script')
+    print('\033[93m' + 'The `event_watcher.conf` file must exist in the same directory as the Python script, exiting' + '\033[m')
     sys.exit(1)
+
   config = configparser.ConfigParser()
   config.read(CONF_FILE)
   config_options = {}
-
   try:
     config_options['DEBUG'] = config.getboolean('general','debug', fallback=False)
     config_options['OPS_MANAGER_SSL_CONNECTION_STRING'] = config.get('ops_manager_db','connection_string')
@@ -55,8 +55,8 @@ def get_config():
     if config_options['AUDIT_DB_SSL'] is True:
       config_options['AUDIT_DB_SSL_PEM'] = config.get('audit_db','ssl_pem_path',fallback=None)
       config_options['AUDIT_DB_SSL_CA'] = config.get('audit_db', 'ssl_ca_cert_path')
-    config_options['OPS_MANAGER_TIMEOUT'] = config.getint('ops_manager_db','timeout', fallback=10000)
-    config_options['AUDIT_DB_TIMEOUT'] = config.getint('audit_db','timeout', fallback=10000)
+    config_options['OPS_MANAGER_TIMEOUT'] = config.getint('ops_manager_db','timeout', fallback=10)
+    config_options['AUDIT_DB_TIMEOUT'] = config.getint('audit_db','timeout', fallback=10)
     temp_pipeline = config.get('ops_manager_db','event_pipeline',fallback=None)
     if temp_pipeline is not None:
       config_options['PIPELINE'] = ast.literal_eval(temp_pipeline)
@@ -64,34 +64,35 @@ def get_config():
       config_options['PIPELINE'] = []
   except (configparser.NoOptionError,configparser.NoSectionError) as e:
     logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
-    logging.error("The config file is missing data: %s " % e)
-    print("""\033[91mERROR! The config file is missing data: %s
+    logging.error("The config file is missing data: %s" % e)
+    print("""\033[91mERROR! The config file is missing data: %s.
 It should be in the following format:
 \033[92m
-[ops_manager_db]
-connection_string=mongodb://admin:superpassword@mongod0.mongodb.local:27017/?replicaSet=appdb
-timeout=1000
-ssl_enabled=True
-ssl_ca_cert_path=/data/pki/ca.cert
-ssl_pem_path=/data/pki/mongod6.mongodb.local.pem
-
 [audit_db]
-connection_string=mongodb://auditor%%40MONGODB.LOCAL@audit.mongodb.local:27017/?replicaSet=repl0&authSource=$external&authMechanism=GSSAPI
-timeout=1000
+connection_string=mongodb://auditor%%40MONGODB.LOCAL@om.mongodb.local:27017/?replicaSet=repl0&authSource=$external&authMechanism=GSSAPI
+timeout=2000
 ssl_enabled=True
+ssl_pem_path=/data/pki/mongod3.mongodb.local.pem
 ssl_ca_cert_path=/data/pki/ca.cert
-ssl_pem_path=/data/pki/mongod6.mongodb.local.pem
+
+[ops_manager_db]
+connection_string=mongodb://auditwriter%%40MONGODB.LOCAL@audit.mongodb.local:27017?replicaSet=audit&authSource=$external&authMechanism=GSSAPI
+timeout=1000
+event_pipeline=[{'$match': {'fullDocument.un': {$in: ['ivan','vigyan','mac','loudSam']}}]
+ssl_enabled=True
+ssl_pem_path=/data/pki/mongod3.mongodb.local.pem
+ssl_ca_cert_path=/data/pki/ca.cert
 
 [general]
-debug=true
+debug=false
 \033[m""" % e)
     sys.exit(1)
   return config_options
 
 # Get resume token, is exists
 def get_resume_token():
-  if os.path.isfile('.config_resume_token'):
-    token_file = open('.config_resume_token','r')
+  if os.path.isfile(sys.path[0] + '.event_resume_token'):
+    token_file = open(sys.path[0] + '.event_resume_token','r')
     retrieved_token = token_file.readline().strip()
     token_file.close()
   else:
@@ -100,14 +101,12 @@ def get_resume_token():
 
 # Record our startup and config
 def record_startup(config_array, debug=False):
-  logger = logging.getLogger(__name__)
   if debug == True:
-    print(logger)
-    logger.info("STARTING PROCESSING: %s" % datetime.datetime.now())
-    logger.debug("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', config_array['AUDIT_DB_CONNECTION_STRING']))
-    logger.debug("OPS MANAGER CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',config_array['OPS_MANAGER_SSL_CONNECTION_STRING']))
-    logger.debug("RESUME TOKEN: %s" % resume_token)
-    logger.debug("PIPELINE: %s" % config_array['PIPELINE'])
+    logging.info("STARTING PROCESSING: %s" % datetime.datetime.now())
+    logging.debug("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', config_array['AUDIT_DB_CONNECTION_STRING']))
+    logging.debug("OPS MANAGER CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',config_array['OPS_MANAGER_SSL_CONNECTION_STRING']))
+    logging.debug("RESUME TOKEN: %s" % resume_token)
+    logging.debug("PIPELINE: %s" % config_array['PIPELINE'])
     print("AUDIT CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@', config_array['AUDIT_DB_CONNECTION_STRING']))
     print("OPS MANAGER CONNECTION STRING: %s" % re.sub('//.+@', '//<REDACTED>@',config_array['OPS_MANAGER_SSL_CONNECTION_STRING']))
     print("RESUME TOKEN: %s" % resume_token)
@@ -137,8 +136,8 @@ def om_db_client(om_db_data, debug=False):
     print('\033[91m' + "Cannot connect to Ops Manager DB, please check settings in config file: %s" %e)
     print('\033[m')
     sys.exit(1)
-  om_db = ops_manager_client['cloudconf']
-  om_collection = om_db['config.appState']
+  om_db = ops_manager_client['mmsdb']
+  om_collection = om_db['data.events']
   return om_collection
 
 # connection to the audit database
@@ -166,10 +165,9 @@ def audit_db_client(audit_db_data, debug=False):
   audit_collection = audit_db['logs']
   return audit_collection
 
-
 def main():
   # declare our log path
-  LOG_FILE = sys.path[0] + '/config_watcher.log'
+  LOG_FILE = sys.path[0] + '/event_watcher.log'
 
   # get our config
   config_data = get_config()
@@ -202,10 +200,17 @@ def main():
     while True:
       document = next(cursor)
       resume_token = document.get("_id")['_data']
-      document['ts'] = document['clusterTime'].as_datetime()
       document['tag'] = 'OPS EVENT'
       document['host'] = 'OPS MANAGER'
-      document['source'] = 'OPS MANAGER CONFIG'
+      if document['fullDocument']['_t'] == 'APP_SETTINGS_CHANGE':
+        document['source'] = 'OPS MANAGER CONFIG'
+      else:
+        document['source'] = 'DEPLOYMENT EVENT'
+      document['ts'] = document['fullDocument']['cre']
+      # retrieve the array of users so our subsequent querying is easier and faster
+      document['users_array'] = []
+      if 'un' in document['fullDocument']:
+        document['users_array'].append(document['fullDocument']['un'])
       document['schema_version'] = 0
       if debug:
         logging.debug("RESUME_TOKEN: %s" % resume_token)
@@ -213,8 +218,9 @@ def main():
         print("DOCUMENT: %s" % document)
       audit_collection.insert_one(document)
   except OperationFailure as e:
-    logging.error(e.details)
     print(e.details)
+    logging.error(e.details)
+
 
 if __name__ == "__main__":
   logger = logging.getLogger(__name__)
