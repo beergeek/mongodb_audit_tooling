@@ -1,4 +1,5 @@
 try:
+  import argparse
   import ast
   import configparser
   import datetime
@@ -30,10 +31,16 @@ resume_token = None
 signal.signal(signal.SIGINT, write_resume_token)
 signal.signal(signal.SIGTERM, write_resume_token)
 
+def get_cmd_args():
+  parser = argparse.ArgumentParser(description='Script to process MongoDB audit log')
+  parser.add_argument('--config','-c', dest='config_file', default=sys.path[0] + '/event_watcher.conf', required=False, help="Alternative location for the config file")
+  parser.add_argument('--log','-l', dest='log_file', default=sys.path[0] + '/event_watcher.log', required=False, help="Alternative location for the log file")
+  return parser.parse_args()
+
 # Get config setting from `event_watcher.config` file
-def get_config():
-  LOG_FILE = sys.path[0] + '/event_watcher.log'
-  CONF_FILE = sys.path[0] + '/event_watcher.conf'
+def get_config(args):
+  LOG_FILE = args.log_file
+  CONF_FILE = args.config_file
   if os.path.isfile(CONF_FILE) == False:
     logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
     logging.error('The `event_watcher.conf` file must exist in the same directory as the Python script')
@@ -170,7 +177,8 @@ def main():
   LOG_FILE = sys.path[0] + '/event_watcher.log'
 
   # get our config
-  config_data = get_config()
+  args = get_cmd_args()
+  config_data = get_config(args)
 
   # retrieve and add our resume token to the config data
   # `resume_token` is a global variable so exit handlers can grab it easily
