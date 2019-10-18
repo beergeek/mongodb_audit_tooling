@@ -204,9 +204,6 @@ def clean_list_data(unclean_data, debug=False):
   return unclean_data
 
 def main():
-  # declare our log path
-  LOG_FILE = sys.path[0] + '/log_processor.log'
-
   # get our config
   args = get_cmd_args()
   config_data = get_config(args)
@@ -220,9 +217,9 @@ def main():
   # setup logging
   debug = config_data['debug']
   if debug == True:
-    logging.basicConfig(filename=LOG_FILE,level=logging.DEBUG)
+    logging.basicConfig(filename=args.log_file,level=logging.DEBUG)
   else:
-    logging.basicConfig(filename=LOG_FILE,level=logging.INFO)
+    logging.basicConfig(filename=args.log_file,level=logging.INFO)
 
   # log our startup and the various settings
   record_startup(config_data, debug)
