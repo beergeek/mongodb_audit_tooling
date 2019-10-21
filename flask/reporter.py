@@ -101,6 +101,7 @@ def index():
     # Index: {"users_array": 1} on `loggig.configs`
     output0 = list(audit_collection.distinct("users_array"))
     output0 = [ elem for elem in output0 if elem != None]
+    output0.append('ALL USERS')
     # Multikey indexes can't be used for distinct
     output1 = list(audit_collection.distinct("fullDocument.clusterConfig.cluster.processes.hostname"))
     output1.append('OPS MANAGER')
@@ -114,8 +115,17 @@ def index():
 @app.route("/user_report", methods=['GET'])
 def get_user():
   try:
-    user_pipeline = [
-      {
+    if request.args['user'] == 'ALL USERS':
+      match = {
+        "$match": {
+          "$and": [
+            {"ts": {"$gt":  datetime.datetime.strptime(request.args['dtg_fixed_low'], "%a, %d %b %Y %H:%M:%S %Z")}},
+            {"ts": {"$lte": datetime.datetime.strptime(request.args['dtg_fixed_high'], "%a, %d %b %Y %H:%M:%S %Z")}}
+          ]
+        }
+      }
+    else:
+      match = {
         "$match": {
           "$and": [
             {"ts": {"$gt":  datetime.datetime.strptime(request.args['dtg_fixed_low'], "%a, %d %b %Y %H:%M:%S %Z")}},
@@ -126,7 +136,9 @@ def get_user():
             {"fullDocument.un": request.args['user']}
           ]
         }
-      }, 
+      }
+    user_pipeline = [
+      match, 
       {
         "$project": {
           "_id": 1,
@@ -135,7 +147,8 @@ def get_user():
           "Changes": {"$ifNull": [{"$arrayElemAt": ["$fullDocument.deploymentDiff.diffs.status",0]}, "$param.command"]},
           "Hosts": {"$ifNull": ["$fullDocument.clusterConfig.cluster.processes.hostname","$host"]},
           "Type": {"$ifNull": ["$fullDocument._t", "$atype"]},
-          "Other": "$fullDocument.et"
+          "Other": "$fullDocument.et",
+          "user": {"$ifNull": ["$users.user","$fullDocument.un"]}
         }
       },
       {
@@ -159,6 +172,8 @@ def get_user():
         event['Changes'] = dumps(event['Other'], indent=2)
       if 'Hosts' in event:
         event['Hosts'] = dumps(event['Hosts'], indent=2)
+      if 'user' in event:
+        event['user'] = dumps(event['user'], indent=2)
     return render_template('user_events.html', events=events, low_date=request.args['dtg_fixed_low'], high_date=request.args['dtg_fixed_high'], user=request.args['user'])
   except OperationFailure as e:
     print(e.details)

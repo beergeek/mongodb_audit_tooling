@@ -10,6 +10,9 @@
       <table>
         <th>Timestamp</th>
         <th>Type</th>
+{% if user == 'ALL USERS' %}
+        <th>User</th></td>
+{% endif %}
         <th>Source</th>
         <th>Changes/Command</th>
         <th>Hosts</th>
@@ -17,6 +20,9 @@
       <tr>
           <td><a href="./user_event_details/{{event['_id']}}" target="_blank"><script>document.write(new Date("{{event['ts']}}"));</script></a></td>
         <td>{{event['Type']}}</td>
+        {% if user == 'ALL USERS' %}
+                <td>{{event['user']}}</td>
+        {% endif %}
         <td>{{event['source']}}</td>
         <td><pre>{{event['Changes']}}</pre></td>
         <td>{{event['Hosts']}}</td>
