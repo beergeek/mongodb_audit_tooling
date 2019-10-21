@@ -28,6 +28,8 @@ def write_resume_token(signum, frame):
   logging.info("TERMINATING PROCESSING: %s" % datetime.datetime.now())
   sys.exit(0)
 
+# Thread for heartbeat
+# Contains own MongoDB connection
 def heartbeat(config_data, debug=False):
   try:
     if config_data['AUDIT_DB_SSL'] is True:
@@ -51,10 +53,10 @@ def heartbeat(config_data, debug=False):
   heartbeat_db = client['logging']
   heartbeat_collection = heartbeat_db['heartbeats']
   try:
-    heartbeat_collection.insert_one({'host': config_data['display_name'],'msg': 'STARTING PROCESSING', 'timestamp': datetime.datetime.now(), 'type': 'event watcher'})
+    heartbeat_collection.insert_one({'host': config_data['DISPLAY_NAME'],'msg': 'STARTING PROCESSING', 'timestamp': datetime.datetime.now(), 'type': 'event watcher'})
     while True:
-      heartbeat_collection.insert_one({'host': config_data['display_name'], 'timestamp': datetime.datetime.now(), 'type': 'event watcher'})
-      time.sleep(config_data['hb_interval'])
+      heartbeat_collection.insert_one({'host': config_data['DISPLAY_NAME'], 'timestamp': datetime.datetime.now(), 'type': 'event watcher'})
+      time.sleep(config_data['HB_INTERVAL'])
   except OperationFailure as e:
     print('\033[91m' + ("Heartbeat Operational Error: %s\n\033[m" % e))
     logging.error("Heartbeat Operational Error: %s\n" % e)
@@ -99,8 +101,8 @@ def get_config(args):
     config_options['OPS_MANAGER_TIMEOUT'] = config.getint('ops_manager_db','timeout', fallback=10)
     config_options['AUDIT_DB_TIMEOUT'] = config.getint('audit_db','timeout', fallback=10)
     temp_pipeline = config.get('ops_manager_db','event_pipeline',fallback=None)
-    config_options['display_name'] = config.get('general','display_name', fallback=socket.gethostname())
-    config_options['hb_interval'] = config.get('general','hb_interval', fallback=60)
+    config_options['DISPLAY_NAME'] = config.get('general','display_name', fallback=socket.gethostname())
+    config_options['HB_INTERVAL'] = config.get('general','hb_interval', fallback=60)
     if temp_pipeline is not None:
       config_options['PIPELINE'] = ast.literal_eval(temp_pipeline)
     else:
