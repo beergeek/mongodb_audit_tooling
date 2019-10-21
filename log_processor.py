@@ -13,6 +13,7 @@ try:
   import sys
   import sys
   import time
+  import threading
   from pymongo.errors import DuplicateKeyError, OperationFailure, InvalidDocument
   from bson.json_util import loads
 except ImportError as e:
@@ -25,12 +26,44 @@ def write_resume_token(signum, frame):
       p = format(time.mktime(resume_token.timetuple()), '.1f')
     else:
       p = datetime.datetime.timestamp(resume_token)
-    outfile = open(sys.path[0] + '/.log_tokens', 'w')
+    outfile = open(token_file, 'w')
     outfile.write(p)
     outfile.close()
     logging.info("RESUME TOKEN: %s %s" % (resume_token, p))
   logging.info("TERMINATING PROCESSING: %s" % datetime.datetime.now())
   sys.exit(0)
+
+def heartbeat(config_data, debug=False):
+  try:
+    if config_data['audit_db_ssl'] is True:
+      if debug is True:
+        logging.debug("Using SSL/TLS")
+        print("Using SSL/TLS")
+      if config_data['audit_db_ssl_pem'] is not None:
+        client = pymongo.MongoClient(config_data['audit_db_connection_string'], serverSelectionTimeoutMS=config_data['audit_db_timeout'], ssl=True, ssl_certfile=config_data['audit_db_ssl_pem'], ssl_ca_certs=config_data['audit_db_ssl_ca'])
+      else:
+        client = pymongo.MongoClient(config_data['audit_db_connection_string'], serverSelectionTimeoutMS=config_data['audit_db_timeout'], ssl=True, ssl_ca_certs=config_data['audit_db_ssl_ca'])
+    else:
+      if debug is True:
+        logging.debug("Not ussing SSL/TLS")
+        print("Not using SSL/TLS")
+      client = pymongo.MongoClient(config_data['audit_db_connection_string'], serverSelectionTimeoutMS=config_data['audit_db_timeout'])
+    client.admin.command('ismaster')
+  except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure) as e:
+    logging.error("Cannot connect to Audit DB, please check settings in config file: %s" %e)
+    print("Cannot connect to DB, please check settings in config file: %s" %e)
+    raise
+  heartbeat_db = client['logging']
+  heartbeat_collection = heartbeat_db['heartbeats']
+  try:
+    heartbeat_collection.insert_one({'host': config_data['display_name'],'msg': 'STARTING PROCESSING', 'timestamp': datetime.datetime.now(), 'type': 'log processor'})
+    while True:
+      heartbeat_collection.insert_one({'host': config_data['display_name'], 'timestamp': datetime.datetime.now(), 'type': 'log processor'})
+      time.sleep(config_data['hb_interval'])
+  except OperationFailure as e:
+    print('\033[91m' + ("Heartbeat Operational Error: %s\n\033[m" % e))
+    logging.error("Heartbeat Operational Error: %s\n" % e)
+
 
 # global varible
 resume_token = None
@@ -53,6 +86,7 @@ def get_cmd_args():
   parser = argparse.ArgumentParser(description='Script to process MongoDB audit log')
   parser.add_argument('--config','-c', dest='config_file', default=sys.path[0] + '/log_processor.conf', required=False, help="Alternative location for the config file")
   parser.add_argument('--log','-l', dest='log_file', default=sys.path[0] + '/log_processor.log', required=False, help="Alternative location for the log file")
+  parser.add_argument('--token','-t', dest='token_file', default=sys.path[0] + '/.log_tokens', required=False, help="Alternative location for the toekn file (make it hidden)")
   return parser.parse_args()
 
 def get_config(args):
@@ -80,6 +114,8 @@ def get_config(args):
     config_options['elevated_config_events'] = config.get('general','elevated_config_events',fallback='').split(',')
     config_options['elevated_app_events'] = config.get('general','elevated_app_events',fallback='').split(',')
     config_options['audit_log'] = config.get('general','audit_log',fallback=sys.path[0] + "/audit.log")
+    config_options['hb_interval'] = config.get('general','hb_interval', fallback=60)
+    config_options['display_name'] = config.get('general','display_name', fallback=socket.gethostname())
   except (configparser.NoOptionError,configparser.NoSectionError) as e:
     logging.basicConfig(filename=LOG_FILE,level=logging.ERROR)
     logging.error("The config file is missing data: %s" % e)
@@ -111,17 +147,17 @@ def create_tz_dtg(temp_time):
 
 def get_resume_token():
   # Get resume token, is exists
-  if os.path.isfile(sys.path[0] + '/.log_tokens'):
+  if os.path.isfile(token_file):
     try:
-      token_file = open(sys.path[0] + '/.log_tokens','r')
-      temp_line = token_file.readline().strip()
+      token_handle = open(token_file,'r')
+      temp_line = token_handle.readline().strip()
       token = create_tz_dtg(temp_line)
     except ValueError:
       print('\033[91m' + "Incorrect format for timestamp: %s, reprocessing all data" % temp_line)
       print('\033[m')
       token = create_tz_dtg(0)
     finally:
-      token_file.close()
+      token_handle.close()
   else:
     token = create_tz_dtg(0)
   return token
@@ -204,13 +240,15 @@ def clean_list_data(unclean_data, debug=False):
   return unclean_data
 
 def main():
+  global resume_token
+  global token_file
   # get our config
   args = get_cmd_args()
+  token_file = args.token_file
   config_data = get_config(args)
 
   # retrieve and add our resume token to the config data
   # `resume_token` is a global variable so exit handlers can grab it easily
-  global resume_token
   config_data['resume_token'] = get_resume_token()
   resume_token = config_data['resume_token']
 
@@ -220,6 +258,11 @@ def main():
     logging.basicConfig(filename=args.log_file,level=logging.DEBUG)
   else:
     logging.basicConfig(filename=args.log_file,level=logging.INFO)
+
+  #start heartbeats
+  hb = threading.Thread(target=heartbeat, args=(config_data, debug))
+  hb.daemon = True
+  hb.start()
 
   # log our startup and the various settings
   record_startup(config_data, debug)

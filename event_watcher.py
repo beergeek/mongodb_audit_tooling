@@ -12,6 +12,8 @@ try:
   import signal
   import sys
   import time
+  import threading
+  import socket
   from pymongo.errors import DuplicateKeyError, OperationFailure
 except ImportError as e:
   print(e)
@@ -25,6 +27,37 @@ def write_resume_token(signum, frame):
     logging.info("RESUME TOKEN: %s" % (resume_token))
   logging.info("TERMINATING PROCESSING: %s" % datetime.datetime.now())
   sys.exit(0)
+
+def heartbeat(config_data, debug=False):
+  try:
+    if config_data['audit_db_ssl'] is True:
+      if debug is True:
+        logging.debug("Using SSL/TLS")
+        print("Using SSL/TLS")
+      if config_data['audit_db_ssl_pem'] is not None:
+        client = pymongo.MongoClient(config_data['audit_db_connection_string'], serverSelectionTimeoutMS=config_data['audit_db_timeout'], ssl=True, ssl_certfile=config_data['audit_db_ssl_pem'], ssl_ca_certs=config_data['audit_db_ssl_ca'])
+      else:
+        client = pymongo.MongoClient(config_data['audit_db_connection_string'], serverSelectionTimeoutMS=config_data['audit_db_timeout'], ssl=True, ssl_ca_certs=config_data['audit_db_ssl_ca'])
+    else:
+      if debug is True:
+        logging.debug("Not ussing SSL/TLS")
+        print("Not using SSL/TLS")
+      client = pymongo.MongoClient(config_data['audit_db_connection_string'], serverSelectionTimeoutMS=config_data['audit_db_timeout'])
+    client.admin.command('ismaster')
+  except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure) as e:
+    logging.error("Cannot connect to Audit DB, please check settings in config file: %s" %e)
+    print("Cannot connect to DB, please check settings in config file: %s" %e)
+    raise
+  heartbeat_db = client['logging']
+  heartbeat_collection = heartbeat_db['heartbeats']
+  try:
+    heartbeat_collection.insert_one({'host': config_data['display_name'],'msg': 'STARTING PROCESSING', 'timestamp': datetime.datetime.now(), 'type': 'event watcher'})
+    while True:
+      heartbeat_collection.insert_one({'host': config_data['display_name'], 'timestamp': datetime.datetime.now(), 'type': 'event watcher'})
+      time.sleep(config_data['hb_interval'])
+  except OperationFailure as e:
+    print('\033[91m' + ("Heartbeat Operational Error: %s\n\033[m" % e))
+    logging.error("Heartbeat Operational Error: %s\n" % e)
 
 # global varible
 resume_token = None
@@ -65,6 +98,7 @@ def get_config(args):
     config_options['OPS_MANAGER_TIMEOUT'] = config.getint('ops_manager_db','timeout', fallback=10)
     config_options['AUDIT_DB_TIMEOUT'] = config.getint('audit_db','timeout', fallback=10)
     temp_pipeline = config.get('ops_manager_db','event_pipeline',fallback=None)
+    config_options['display_name'] = config.get('general','display_name', fallback=socket.gethostname())
     if temp_pipeline is not None:
       config_options['PIPELINE'] = ast.literal_eval(temp_pipeline)
     else:
@@ -173,6 +207,8 @@ def audit_db_client(audit_db_data, debug=False):
   return audit_collection
 
 def main():
+  global resume_token
+  global token_file
   # declare our log path
   LOG_FILE = sys.path[0] + '/event_watcher.log'
 
@@ -182,7 +218,6 @@ def main():
 
   # retrieve and add our resume token to the config data
   # `resume_token` is a global variable so exit handlers can grab it easily
-  global resume_token
   config_data['resume_token'] = get_resume_token()
   resume_token = config_data['resume_token']
 
@@ -192,6 +227,11 @@ def main():
     logging.basicConfig(filename=LOG_FILE,level=logging.DEBUG)
   else:
     logging.basicConfig(filename=LOG_FILE,level=logging.INFO)
+
+  #start heartbeats
+  hb = threading.Thread(target=heartbeat, args=(config_data, debug))
+  hb.daemon = True
+  hb.start()
 
   # log our startup and the various settings
   record_startup(config_data, debug)
