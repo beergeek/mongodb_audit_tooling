@@ -64,6 +64,7 @@ audit_log=<AUDIT_LOG_PATH>
 elevated_ops_events=<COMMA_SEPARATED_LIST>
 elevated_app_events=<COMMA_SEPARATED_LIST>
 elevated_config_events=<COMMA_SEPARATED_LIST>
+display_name=<STRING>
 ```
 
 Example:
@@ -82,6 +83,7 @@ audit_log=/data/logs/audit_log
 elevated_config_events=shutdown,setParameter,setFeatureCompatibilityVersion,addShard,addShardToZone,balancerStart,balancerStop,enableSharding,flushRouterConfig,moveChunk,mergeChunks,removeShard,removeShardFromZone,setShardVersion,shardCollection,splitChunk,unsetSharding,updateZoneKeyRange,replSetReconfig,replSetInitiate
 elevated_ops_events=createUser,deleteUser
 elevated_app_events=dropCollection,dropDatabase
+display_name=mongod0.mongodb.local:27018
 ```
 
 NOTE that URL encoded special characters require double `%`, e.g `@` would be `%%40` (such as the MongoDB connection string).
@@ -91,6 +93,8 @@ Both sections are mandatory, as well as the `connection_string` option, but the 
 The `elevated_app_events`, `elevated_config_events` `elevated_ops_events` are comma separated lists of events that will be either tagged as `APP EVENT`, `CONFIG EVENT` or `OPS EVENT` respectively for easy querying in the audit database. The list of events are available in the [MongoDB documentation](https://docs.mongodb.com/manual/reference/audit-message/#audit-event-actions-details-and-results).
 
 The `audit_log` option, which is optional, is the path, including file name, to the MongoDB instance audit log, the default is `audit.log` in the directory where the script resides.
+
+The `display_name` is a user friendly name that the heartbeats will use. This can be used to identify different MongoDB instances on the same node. The default is the FQDN of the node.
 
 ### Setup
 
@@ -114,7 +118,7 @@ setParameter:
   auditAuthorizationSuccess: "true"
 ```
 
-The script and config file must be located in the same directory. A systemD service file can be created to run these scripts automatically on start:
+By default, the script and config file are located in the same directory. A systemD service file can be created to run these scripts automatically on start:
 
 ```shell
 [Unit]
@@ -132,6 +136,24 @@ Type=simple
 WantedBy=multi-user.target
 ```
 
+An alternative location for the config file and log file can be provided. If a different config file is used we suggest using a different file for the resume token as well, such as:
+
+```shell
+[Unit]
+Description=Watcher Script for MongoDB Auditing
+After=network.target
+
+[Service]
+User=mongod
+Group=mongod
+Environment="KRB5_CLIENT_KTNAME=/data/pki/audit.keytab"
+ExecStart=/bin/python /data/logs/log_processor.py -c /data/scripts/db0.conf -l /data/scripts/db0.log -t /data/scripts/.db0.token
+Type=simple
+
+[Install]
+WantBy=multi-user.target
+```
+
 ### Running the script
 
 The script can simply be run with:
@@ -143,8 +165,10 @@ python3 log_processor.py
 Or if a different config or log file is required the following can be run, as an example:
 
 ```shell
-python3 /data/scripts/log_processor.py -c /data/scripts/db0.conf -l /data/scripts/db0.log
+python3 /data/scripts/log_processor.py -c /data/scripts/db0.conf -l /data/scripts/db0.log -t /data/scripts/.db0.token
 ```
+
+The script can be run via SystemD as well, see above.
 
 ## event_watcher
 
@@ -570,12 +594,21 @@ The `reporter` script user that accesses the audit db will need the following pr
   	{
   		"resource" : {
   			"db" : "logging",
+  			"collection" : "heartbeats"
+  		},
+  		"actions" : [
+        "insert"
+  		]
+  	},
+  	{
+  		"resource" : {
+  			"db" : "logging",
   			"collection" : "standards"
   		},
   		"actions" : [
         "find",
         "insert",
-        "update",
+        "update"
   		]
   	},
   	{
@@ -596,7 +629,7 @@ The `reporter` script user that accesses the audit db will need the following pr
   		"actions" : [
         "find",
         "insert",
-        "update",
+        "update"
   		]
   	},
   	{

@@ -119,10 +119,10 @@ try:
     if DEBUG is True:
       logging.debug("Using SSL/TLS to Audit DB")
       print("Using SSL/TLS to Audit DB")
-      if AUDIT_DB_SSL_PEM is not None:
-        audit_client = pymongo.MongoClient(AUDIT_DB_CONNECTION_STRING, serverSelectionTimeoutMS=AUDIT_DB_TIMEOUT, ssl=True, ssl_certfile=AUDIT_DB_SSL_PEM, ssl_ca_certs=AUDIT_DB_SSL_CA)
-      else:
-        audit_client = pymongo.MongoClient(AUDIT_DB_CONNECTION_STRING, serverSelectionTimeoutMS=AUDIT_DB_TIMEOUT, ssl=True, ssl_ca_certs=AUDIT_DB_SSL_CA)
+    if AUDIT_DB_SSL_PEM is not None:
+      audit_client = pymongo.MongoClient(AUDIT_DB_CONNECTION_STRING, serverSelectionTimeoutMS=AUDIT_DB_TIMEOUT, ssl=True, ssl_certfile=AUDIT_DB_SSL_PEM, ssl_ca_certs=AUDIT_DB_SSL_CA)
+    else:
+      audit_client = pymongo.MongoClient(AUDIT_DB_CONNECTION_STRING, serverSelectionTimeoutMS=AUDIT_DB_TIMEOUT, ssl=True, ssl_ca_certs=AUDIT_DB_SSL_CA)
   else:
     if DEBUG is True:
       logging.debug("Not ussing SSL/TLS to Audit DB")
@@ -468,7 +468,7 @@ def main():
             compliance = check_dict("processes", STANDARDS['standard']['processes'], instance, waiver_details['processes'])
             # If we have a compliance issue or waiver in place we record that too
             if compliance:
-              compliance['host'] = instance['hostname']
+              compliance['host'] = instance['hostname'] + ':' + str(instance['args2_6']['net']['port'])
               if DEBUG:
                 print("COMPLIANCE: %s" % compliance)
               # Deep copy because Python does copy by reference
