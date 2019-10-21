@@ -30,19 +30,19 @@ def write_resume_token(signum, frame):
 
 def heartbeat(config_data, debug=False):
   try:
-    if config_data['audit_db_ssl'] is True:
+    if config_data['AUDIT_DB_SSL'] is True:
       if debug is True:
         logging.debug("Using SSL/TLS")
         print("Using SSL/TLS")
-      if config_data['audit_db_ssl_pem'] is not None:
-        client = pymongo.MongoClient(config_data['audit_db_connection_string'], serverSelectionTimeoutMS=config_data['audit_db_timeout'], ssl=True, ssl_certfile=config_data['audit_db_ssl_pem'], ssl_ca_certs=config_data['audit_db_ssl_ca'])
+      if config_data['AUDIT_DB_SSL_PEM'] is not None:
+        client = pymongo.MongoClient(config_data['AUDIT_DB_CONNECTION_STRING'], serverSelectionTimeoutMS=config_data['AUDIT_DB_TIMEOUT'], ssl=True, ssl_certfile=config_data['AUDIT_DB_SSL_PEM'], ssl_ca_certs=config_data['AUDIT_DB_SSL_CA'])
       else:
-        client = pymongo.MongoClient(config_data['audit_db_connection_string'], serverSelectionTimeoutMS=config_data['audit_db_timeout'], ssl=True, ssl_ca_certs=config_data['audit_db_ssl_ca'])
+        client = pymongo.MongoClient(config_data['AUDIT_DB_CONNECTION_STRING'], serverSelectionTimeoutMS=config_data['AUDIT_DB_TIMEOUT'], ssl=True, ssl_ca_certs=config_data['AUDIT_DB_SSL_CA'])
     else:
       if debug is True:
         logging.debug("Not ussing SSL/TLS")
         print("Not using SSL/TLS")
-      client = pymongo.MongoClient(config_data['audit_db_connection_string'], serverSelectionTimeoutMS=config_data['audit_db_timeout'])
+      client = pymongo.MongoClient(config_data['AUDIT_DB_CONNECTION_STRING'], serverSelectionTimeoutMS=config_data['AUDIT_DB_TIMEOUT'])
     client.admin.command('ismaster')
   except (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure) as e:
     logging.error("Cannot connect to Audit DB, please check settings in config file: %s" %e)
@@ -68,6 +68,7 @@ def get_cmd_args():
   parser = argparse.ArgumentParser(description='Script to process MongoDB audit log')
   parser.add_argument('--config','-c', dest='config_file', default=sys.path[0] + '/event_watcher.conf', required=False, help="Alternative location for the config file")
   parser.add_argument('--log','-l', dest='log_file', default=sys.path[0] + '/event_watcher.log', required=False, help="Alternative location for the log file")
+  parser.add_argument('--token','-t', dest='token_file', default=sys.path[0] + '/.event_resume_token', required=False, help="Alternative location for the token file (make it hidden)")
   return parser.parse_args()
 
 # Get config setting from `event_watcher.config` file
@@ -99,6 +100,7 @@ def get_config(args):
     config_options['AUDIT_DB_TIMEOUT'] = config.getint('audit_db','timeout', fallback=10)
     temp_pipeline = config.get('ops_manager_db','event_pipeline',fallback=None)
     config_options['display_name'] = config.get('general','display_name', fallback=socket.gethostname())
+    config_options['hb_interval'] = config.get('general','hb_interval', fallback=60)
     if temp_pipeline is not None:
       config_options['PIPELINE'] = ast.literal_eval(temp_pipeline)
     else:
@@ -132,10 +134,10 @@ debug=false
 
 # Get resume token, is exists
 def get_resume_token():
-  if os.path.isfile(sys.path[0] + '.event_resume_token'):
-    token_file = open(sys.path[0] + '.event_resume_token','r')
-    retrieved_token = token_file.readline().strip()
-    token_file.close()
+  if os.path.isfile(token_file):
+    token_handle = open(token_file,'r')
+    retrieved_token = token_handle.readline().strip()
+    token_handle.close()
   else:
     retrieved_token = None
   return retrieved_token
@@ -214,6 +216,7 @@ def main():
 
   # get our config
   args = get_cmd_args()
+  token_file = args.token_file
   config_data = get_config(args)
 
   # retrieve and add our resume token to the config data
@@ -264,7 +267,11 @@ def main():
         logging.debug("RESUME_TOKEN: %s" % resume_token)
         print("RESUME_TOKEN: %s" % resume_token)
         print("DOCUMENT: %s" % document)
-      audit_collection.insert_one(document)
+      try:
+        audit_collection.insert_one(document)
+      except DuplicateKeyError as e:
+        print(e.details)
+        logging.error(e.details)
   except OperationFailure as e:
     print(e.details)
     logging.error(e.details)
