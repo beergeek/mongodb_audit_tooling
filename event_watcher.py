@@ -54,12 +54,16 @@ def heartbeat(config_data, debug=False):
   heartbeat_collection = heartbeat_db['heartbeats']
   try:
     heartbeat_collection.insert_one({'host': config_data['DISPLAY_NAME'],'msg': 'STARTING PROCESSING', 'timestamp': datetime.datetime.now(), 'type': 'event watcher'})
-    while True:
-      heartbeat_collection.insert_one({'host': config_data['DISPLAY_NAME'], 'timestamp': datetime.datetime.now(), 'type': 'event watcher'})
-      time.sleep(config_data['HB_INTERVAL'])
   except OperationFailure as e:
     print('\033[91m' + ("Heartbeat Operational Error: %s\n\033[m" % e))
     logging.error("Heartbeat Operational Error: %s\n" % e)
+  while True:
+    try:
+      heartbeat_collection.insert_one({'host': config_data['DISPLAY_NAME'], 'timestamp': datetime.datetime.now(), 'type': 'event watcher'})
+      time.sleep(config_data['HB_INTERVAL'])
+    except OperationFailure as e:
+      print('\033[91m' + ("Heartbeat Operational Error: %s\n\033[m" % e))
+      logging.error("Heartbeat Operational Error: %s\n" % e)
 
 # global varible
 resume_token = None
